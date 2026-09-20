@@ -1,5 +1,5 @@
 % 项目统一参考文献库；核验日期：2026-09-20。
-% 23 条：项目书原有 9 条，补充 14 条。版本与阅读范围见 README.md 和 notes/。
+% 35 条：项目书原有 9 条，补充 26 条；开题报告实际使用的 28 条文献已并入。
 % 会议条目 DOI 仅使用会议出版 DOI；arXiv 标识作为关联版本保留。
 
 @misc{lu2025onpolicydistillation,
@@ -321,5 +321,149 @@
   eprint = {2103.03874},
   archivePrefix = {arXiv},
   url = {https://datasets-benchmarks-proceedings.neurips.cc/paper/2021/hash/be83ab3ecd0db773eb2dc1b0a17836a1-Abstract-round2.html},
+  urldate = {2026-09-20},
+}
+
+% 开题报告实际使用的补充核验条目（对应报告参考文献 [17]--[28]）。
+
+@article{kullback1951information,
+  title = {On Information and Sufficiency},
+  author = {Kullback, Solomon and Leibler, Richard A.},
+  journal = {The Annals of Mathematical Statistics},
+  volume = {22},
+  number = {1},
+  pages = {79--86},
+  year = {1951},
+  doi = {10.1214/aoms/1177729694},
+  url = {https://doi.org/10.1214/aoms/1177729694},
+  urldate = {2026-09-20},
+}
+
+@article{lin1991divergence,
+  title = {Divergence Measures Based on the Shannon Entropy},
+  author = {Lin, Jianhua},
+  journal = {IEEE Transactions on Information Theory},
+  volume = {37},
+  number = {1},
+  pages = {145--151},
+  year = {1991},
+  url = {https://pdodds.w3.uvm.edu/research/papers/others/1991/lin1991a.pdf},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{hu2022lora,
+  title = {{LoRA}: Low-Rank Adaptation of Large Language Models},
+  author = {Hu, Edward J. and Shen, Yelong and Wallis, Phillip and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Shean and Wang, Lu and Chen, Weizhu},
+  booktitle = {International Conference on Learning Representations},
+  year = {2022},
+  eprint = {2106.09685},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2106.09685},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{kwon2023pagedattention,
+  title = {Efficient Memory Management for Large Language Model Serving with {PagedAttention}},
+  author = {Kwon, Woosuk and Li, Zhuohan and Zhuang, Siyuan and Sheng, Ying and Zheng, Lianmin and Yu, Cody Hao and Gonzalez, Joseph E. and Zhang, Hao and Stoica, Ion},
+  booktitle = {Proceedings of the 29th Symposium on Operating Systems Principles},
+  year = {2023},
+  pages = {611--626},
+  publisher = {Association for Computing Machinery},
+  doi = {10.1145/3600006.3613165},
+  eprint = {2309.06180},
+  archivePrefix = {arXiv},
+  url = {https://doi.org/10.1145/3600006.3613165},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{yao2023react,
+  title = {{ReAct}: Synergizing Reasoning and Acting in Language Models},
+  author = {Yao, Shunyu and Zhao, Jeffrey and Yu, Dian and Du, Nan and Shafran, Izhak and Narasimhan, Karthik and Cao, Yuan},
+  booktitle = {International Conference on Learning Representations},
+  year = {2023},
+  eprint = {2210.03629},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2210.03629},
+  urldate = {2026-09-20},
+}
+
+@misc{patil2023gorilla,
+  title = {Gorilla: Large Language Model Connected with Massive APIs},
+  author = {Patil, Shishir G. and Zhang, Tianjun and Wang, Xin and Gonzalez, Joseph E.},
+  howpublished = {arXiv preprint},
+  year = {2023},
+  eprint = {2305.15334},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.CL},
+  url = {https://arxiv.org/abs/2305.15334},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{li2023apibank,
+  title = {{API}-Bank: A Comprehensive Benchmark for Tool-Augmented {LLMs}},
+  author = {Li, Minghao and Zhao, Yingxiu and Yu, Bowen and Song, Feifan and Li, Hangyu and Yu, Haiyang and Li, Zhoujun and Huang, Fei and Li, Yongbin},
+  booktitle = {Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing},
+  year = {2023},
+  pages = {3102--3116},
+  publisher = {Association for Computational Linguistics},
+  doi = {10.18653/v1/2023.emnlp-main.187},
+  url = {https://aclanthology.org/2023.emnlp-main.187/},
+  urldate = {2026-09-20},
+}
+
+@misc{qin2023toollm,
+  title = {{ToolLLM}: Facilitating Large Language Models to Master 16000+ Real-world APIs},
+  author = {Qin, Yujia and Liang, Shihao and Ye, Yining and Zhu, Kunlun and Yan, Lan and Lu, Yaxi and Lin, Yankai and Cong, Xin and Tang, Xiangru and Qian, Bill and Zhao, Sihan and Hong, Lauren and Tian, Runchu and Xie, Ruobing and Zhou, Jie and Gerstein, Mark and Li, Dahai and Liu, Zhiyuan and Sun, Maosong},
+  howpublished = {arXiv preprint},
+  year = {2023},
+  eprint = {2307.16789},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.CL},
+  url = {https://arxiv.org/abs/2307.16789},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{liu2024apigen,
+  title = {{APIGen}: Automated PIpeline for Generating Verifiable and Diverse Function-Calling Datasets},
+  author = {Liu, Zuxin and Hoang, Thai and Zhang, Jianguo and Zhu, Ming and Lan, Tian and Kokane, Shirley and Tan, Juntao and Yao, Weiran and Liu, Zhiwei and Feng, Yihao and Murthy, Rithesh and Yang, Liangwei and Savarese, Silvio and Niebles, Juan Carlos and Wang, Huan and Heinecke, Shelby and Xiong, Caiming},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year = {2024},
+  doi = {10.52202/079017-1725},
+  url = {https://proceedings.neurips.cc/paper_files/paper/2024/hash/61cce86d180b1184949e58939c4f983d-Abstract-Datasets_and_Benchmarks_Track.html},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{liu2025toolace,
+  title = {{ToolACE}: Winning the Points of {LLM} Function Calling},
+  author = {Liu, Weiwen and Huang, Xu and Zeng, Xingshan and Hao, Xinlong and Yu, Shuai and Li, Dexun and Wang, Shuai and Gan, Weinan and Liu, Zhengying and Yu, Yuanqing and Wang, Zezhong and Wang, Yuxian and Ning, Wu and Hou, Yutai and Wang, Bin and Wu, Chuhan and Wang, Xinzhi and Liu, Yong and Wang, Yasheng and Tang, Duyu and Tu, Dandan and Shang, Lifeng and Jiang, Xin and Tang, Ruiming and Lian, Defu and Liu, Qun and Chen, Enhong},
+  booktitle = {International Conference on Learning Representations},
+  year = {2025},
+  eprint = {2409.00920},
+  archivePrefix = {arXiv},
+  url = {https://proceedings.iclr.cc/paper_files/paper/2025/hash/663865ea167425c6c562cb0b6bcf76c7-Abstract-Conference.html},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{patil2025bfcl,
+  title = {The Berkeley Function Calling Leaderboard ({BFCL}): From Tool Use to Agentic Evaluation of Large Language Models},
+  author = {Patil, Shishir G. and Mao, Huanzhi and Yan, Fanjia and Ji, Charlie Cheng-Jie and Suresh, Vishnu and Stoica, Ion and Gonzalez, Joseph E.},
+  booktitle = {Proceedings of the 42nd International Conference on Machine Learning},
+  series = {Proceedings of Machine Learning Research},
+  volume = {267},
+  pages = {48371--48392},
+  year = {2025},
+  publisher = {PMLR},
+  url = {https://proceedings.mlr.press/v267/patil25a.html},
+  urldate = {2026-09-20},
+}
+
+@inproceedings{liu2024agentbench,
+  title = {{AgentBench}: Evaluating {LLMs} as Agents},
+  author = {Liu, Xiao and Yu, Hao and Zhang, Hanchen and Xu, Yifan and Lei, Xuanyu and Lai, Hanyu and Gu, Yu and Ding, Hangliang and Men, Kaiwen and Yang, Kejuan and Zhang, Shudan and Deng, Xiang and Zeng, Aohan and Du, Zhengxiao and Zhang, Chenhui and Shen, Sheng and Zhang, Tianjun and Su, Yu and Sun, Huan and Huang, Minlie and Dong, Yuxiao and Tang, Jie},
+  booktitle = {International Conference on Learning Representations},
+  year = {2024},
+  eprint = {2308.03688},
+  archivePrefix = {arXiv},
+  url = {https://arxiv.org/abs/2308.03688},
   urldate = {2026-09-20},
 }
