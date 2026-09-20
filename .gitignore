@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 论文原始资料仅保留在本地，远程使用加密压缩包
+/Papers/
