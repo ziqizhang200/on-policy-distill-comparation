@@ -62,7 +62,10 @@ def figure_one():
             if rid < 2:
                 arrow(ax, (x + width / 2, y - .012),
                       (x + width / 2, labels[rid + 1][1] + height + .012))
-    label(ax, .5, .035, '统一测试流程贯穿三项方法：同轨迹回放 · 同预算训练 · 结构化调用评测', 12)
+    box(ax, .105, .012, .845, .105,
+        '第四项研究：统一测试系统——配对回放 · 独立闭环 · 错误追踪 · 分项计量', 12, FILL)
+    for x in cols:
+        arrow(ax, (x + width / 2, .14), (x + width / 2, .12))
     fig.savefig(ROOT / 'figure1_method_levels.png', dpi=100)
     plt.close(fig)
 
@@ -76,14 +79,14 @@ def figure_two():
         '方法一\n状态选择\n确定监督位置',
         '方法二\n条件化散度\n确定更新方向',
         '方法三\n稀疏反馈\n确定候选与尾部质量',
-        '统一验证\n数值与梯度\n调用结果与成本',
+        '方法四\n统一测试系统\n回放、闭环与追踪',
     ]
     for i, x in enumerate(xvals):
         box(ax, x, y, w, h, items[i], 13.5, FILL if 1 <= i <= 3 else 'white')
         if i < 4:
             arrow(ax, (x + w + .008, y + h / 2),
                   (xvals[i + 1] - .008, y + h / 2))
-    label(ax, .5, .18, '统一模型、数据、生成协议和训练预算；逐项验证三种方法，再检验组合效果', 12)
+    label(ax, .5, .18, '同前缀比较局部机制；同起点验证闭环表现；统一任务判定与资源口径', 12)
     fig.savefig(ROOT / 'figure2_method_route.png', dpi=100)
     plt.close(fig)
 
