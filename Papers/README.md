@@ -65,7 +65,7 @@
 | 2 | Rethinking OPD I | `li2026rethinkingopdphenomenology` | 完整作者与 v2；保留原 arXiv 编号。 |
 | 3 | Rethinking OPD II | `fu2026rethinkingopdoneshot` | 完整作者与 2026-09-03 的 v1。 |
 | 4 | Revisiting OPD | `fu2026revisitingopd` | 完整作者与 v2。 |
-| 5 | HPD | `zhu2026hybridpolicydistillation` | 完整四作者；arXiv 及 ICML 官方下载名录均指向该工作，尚未核实论文集卷页，暂引用预印本。 |
+| 5 | HPD | `zhu2026hybridpolicydistillation` | 完整四作者；已在 PMLR 正式出版页核实 ICML 2026、卷号 306 和页码 167818—167837。 |
 | 6 | OPD Survey | `song2026survey` | 两作者，v4；页面标注 Ongoing Work。 |
 | 7 | Qwen3 | `qwen3technicalreport` | 补 arXiv:2505.09388；沿用官方支持的 Qwen Team 团体署名。 |
 | 8 | DeepSeek-V4 | `deepseekai2026deepseekv4` | 用官方 DeepSeek-AI 团体署名；编号与页面提交月份不一致，仅保留原文证据，不猜测原因。 |
@@ -79,7 +79,7 @@
 - [GKD 正式论文第 9 页相关工作及参考文献](https://proceedings.iclr.cc/paper_files/paper/2024/file/5be69a584901a26c521c2b51e40a4c20-Paper-Conference.pdf) → DAgger、ImitKD、f-DISTILL；其散度部分还引用 Huszár。
 - DistiLLM、DistiLLM-2、PPO、DPO 和评测文献通过主题检索补充，不把主题相关性冒写为已经核对的直接引用关系。
 
-逐条来源、版本差异和阅读范围见：[原方法文献 1—5](notes/verified_seed_methods.md)、[原综述与报告 6—9](notes/verified_seed_reports.md)、[基础文献](notes/verified_foundations.md)、[核心方法与评测](notes/verified_core_methods.md)。[ICML 2026 官方名录](https://icml.cc/Downloads/2026)也列出 HPD；单篇海报链接本次未成功读取，未补写未核实卷页。
+逐条来源、版本差异和阅读范围见：[原方法文献 1—5](notes/verified_seed_methods.md)、[原综述与报告 6—9](notes/verified_seed_reports.md)、[基础文献](notes/verified_foundations.md)、[核心方法与评测](notes/verified_core_methods.md)。[PMLR 正式出版页](https://proceedings.mlr.press/v306/zhu26av.html)已核实 HPD 的卷页。
 
 ## 后续实验设计需要先确认的事项
 
