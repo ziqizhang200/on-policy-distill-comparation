@@ -1,0 +1,9 @@
+name: opdistill
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11.18
+  - pip=26.2.2
+  # CUDA PyTorch 及应用依赖按 README 指定的官方索引分步安装。
+  # 不通过 conda env create 自动替换 CUDA wheel。
