@@ -2,7 +2,7 @@
 
 核验日期：2026-09-20（研究时间截点）
 
-本笔记保存原始发布页面的核验依据；正式书目字段统一维护于 [references.bib](../references.bib)。第 1 条使用 Thinking Machines Lab 官方文章及其文章内置引用；第 2—5 条核对 arXiv 摘要页与 HTML 正文。HPD 的 ICML 2026 信息另经[官方下载名录](https://icml.cc/Downloads/2026)确认；单篇海报页本次未成功读取，未补写会议论文集卷期或页码，当前引用 arXiv v2。
+本笔记保存原始发布页面的核验依据；正式书目字段统一维护于 [references.bib](../references.bib)。第 1 条使用 Thinking Machines Lab 官方文章及其文章内置引用；第 2—5 条核对 arXiv 摘要页与 HTML 正文。HPD 的 ICML 2026 信息及正式论文集卷页已在 [PMLR 单篇出版页](https://proceedings.mlr.press/v306/zhu26av.html)核实；arXiv v2 保留为阅读版本记录。
 
 实现阅读边界（项目待查，不是对原文的错误断言）：sampled-token 目标是在学生分布上采样一个 token，并不等于取 Top-1 argmax；Top-$K$ 目标必须同时记录支持集来自教师还是学生，以及是否在支持集内重归一化。按第 2 条 HTML §2.2 式 (5)，若 $k=1$ 且 $p/q$ 都在单元素支持集内重归一化，子集 KL 在数学上恒为 0；同文 §6.3 又讨论 Top-1 训练，因此应结合原文上下文和代码核查后再形成实现结论，不能直接写成论文错误。
 
@@ -14,7 +14,7 @@
 | 2 | *Rethinking On-Policy Distillation of Large Language Models: Phenomenology, Mechanism, and Recipe* | Yaxuan Li；Yuxin Zuo；Bingxiang He；Jinqian Zhang；Chaojun Xiao；Cheng Qian；Tianyu Yu；Huan-ang Gao；Wenkai Yang；Zhiyuan Liu；Ning Ding | 2026 | arXiv 预印本，cs.LG（并列 cs.AI、cs.CL） | `arXiv:2604.13016`，当前 v2 | 已核实 |
 | 3 | *Rethinking On-Policy Distillation of Large Language Models II: One Training Example* | Zixuan Fu；Bingxiang He；Yuxin Zuo；Haohuan Huang；Jinqian Zhang；Ruhang Xiao；Cheng Qian；Qinyu Luo；Huan-ang Gao；Yudong Wang；Zhiyuan Liu；Ning Ding；Chaojun Xiao | 2026 | arXiv 预印本，cs.AI（并列 cs.CL） | `arXiv:2609.04172`，v1 | 已核实 |
 | 4 | *Revisiting On-Policy Distillation: Empirical Failure Modes and Simple Fixes* | Yuqian Fu；Haohuan Huang；Kaiwen Jiang；Jiacai Liu；Zhuo Jiang；Yuanheng Zhu；Dongbin Zhao | 2026 | arXiv 预印本，cs.LG（并列 cs.AI、cs.CL） | `arXiv:2603.25562`，当前 v2 | 已核实 |
-| 5 | *Hybrid Policy Distillation for LLMs* | Wenhong Zhu；Ruobing Xie；Rui Wang；Pengfei Liu | 2026 | arXiv 预印本，cs.CL；arXiv Comments 标注 ICML 2026 | `arXiv:2604.20244`，当前 v2 | 已核实 |
+| 5 | *Hybrid Policy Distillation for LLMs* | Wenhong Zhu；Ruobing Xie；Rui Wang；Pengfei Liu | 2026 | ICML，PMLR 306，167818—167837 | [正式出版页](https://proceedings.mlr.press/v306/zhu26av.html)；预印本 `arXiv:2604.20244` | 已核实 |
 
 ## 1. On-Policy Distillation
 
@@ -111,7 +111,8 @@
 
 ### 来源与书目信息
 
-- 摘要/元数据原始页：[arXiv:2604.20244](https://arxiv.org/abs/2604.20244)
+- 正式出版页：[PMLR 306，ICML 2026](https://proceedings.mlr.press/v306/zhu26av.html)，第 167818—167837 页。
+- 摘要/预印本页：[arXiv:2604.20244](https://arxiv.org/abs/2604.20244)
 - 全文原始页：[arXiv HTML v2](https://arxiv.org/html/2604.20244v2)
 - DOI：[10.48550/arXiv.2604.20244](https://doi.org/10.48550/arXiv.2604.20244)
 - arXiv 摘要页显示：2026-04-22 提交，2026-08-08 修订为 v2；引用标识为 `arXiv:2604.20244 [cs.CL]`，Comments 字段为 **ICML 2026**。
@@ -128,7 +129,7 @@
 
 ### 信息补全与版本说明
 
-项目书使用前三位作者加 et al. 的简写；完整作者为 **Wenhong Zhu、Ruobing Xie、Rui Wang、Pengfei Liu**。精确题名为 *Hybrid Policy Distillation for LLMs*；arXiv 当前版本是 v2。ICML 官方名录已确认该题目，但正式论文集卷页尚未核实，BibTeX 保持 `@misc` 并引用 arXiv DOI。
+项目书使用前三位作者加 et al. 的简写；完整作者为 **Wenhong Zhu、Ruobing Xie、Rui Wang、Pengfei Liu**。精确题名为 *Hybrid Policy Distillation for LLMs*。2026-10-08 已从 PMLR 正式出版页核实会议名、卷号 306 和页码 167818—167837，BibTeX 改引正式会议版；arXiv v2 保留为先前阅读版本记录。
 
 ## 未核实条目
 

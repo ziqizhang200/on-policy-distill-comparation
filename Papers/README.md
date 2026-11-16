@@ -1,6 +1,8 @@
 # 项目参考文献
 
-本目录为“基于在线策略蒸馏的大语言模型后训练方法研究”维护统一参考文献。截至 **2026-09-20**，已收录 **23 条**：项目书原有 9 条全部覆盖，补充 14 条。包含学术论文、预印本、模型技术报告，以及 1 条官方技术博客；不将它们统称为已同行评审论文。
+开题答辩后修改研究方案时，先阅读 [开题报告修改与研究方案交接](OPENING_REPORT_HANDOFF.md)。该文件记录导师反馈、学长建议、候选方法及待验证事项；本页继续作为已核验文献的索引，不把方案讨论当作文献结论。
+
+本目录为“基于在线策略蒸馏的大语言模型后训练方法研究”维护统一参考文献。截至 **2026-09-23**，当时已收录 **34 条**；2026-10-07 文件含 **45 条 BibTeX 条目**，新增条目及开题报告实际引用数量需要重新核对。原报告曾精选与研究问题直接相关的 21 条来源，并优先采用 ICLR、ICML、ACL、EMNLP、NeurIPS、SOSP 等正式会议或期刊版本。正式文献库应只保留经实际核验的学术论文、预印本和模型技术报告，不收录技术博客。
 
 正式书目唯一来源是 [references.bib](references.bib)。下表给出主题、用途和阅读优先级，作者、准确题名、年份、出版信息、DOI/arXiv 标识与访问日期见 BibTeX。核验记录保存实际访问来源和阅读范围，元数据核实不等于全文精读，更不代表本项目已复现实验。
 
@@ -63,7 +65,7 @@
 | 2 | Rethinking OPD I | `li2026rethinkingopdphenomenology` | 完整作者与 v2；保留原 arXiv 编号。 |
 | 3 | Rethinking OPD II | `fu2026rethinkingopdoneshot` | 完整作者与 2026-09-03 的 v1。 |
 | 4 | Revisiting OPD | `fu2026revisitingopd` | 完整作者与 v2。 |
-| 5 | HPD | `zhu2026hybridpolicydistillation` | 完整四作者；arXiv 及 ICML 官方下载名录均指向该工作，尚未核实论文集卷页，暂引用预印本。 |
+| 5 | HPD | `zhu2026hybridpolicydistillation` | 完整四作者；已在 PMLR 正式出版页核实 ICML 2026、卷号 306 和页码 167818—167837。 |
 | 6 | OPD Survey | `song2026survey` | 两作者，v4；页面标注 Ongoing Work。 |
 | 7 | Qwen3 | `qwen3technicalreport` | 补 arXiv:2505.09388；沿用官方支持的 Qwen Team 团体署名。 |
 | 8 | DeepSeek-V4 | `deepseekai2026deepseekv4` | 用官方 DeepSeek-AI 团体署名；编号与页面提交月份不一致，仅保留原文证据，不猜测原因。 |
@@ -77,7 +79,7 @@
 - [GKD 正式论文第 9 页相关工作及参考文献](https://proceedings.iclr.cc/paper_files/paper/2024/file/5be69a584901a26c521c2b51e40a4c20-Paper-Conference.pdf) → DAgger、ImitKD、f-DISTILL；其散度部分还引用 Huszár。
 - DistiLLM、DistiLLM-2、PPO、DPO 和评测文献通过主题检索补充，不把主题相关性冒写为已经核对的直接引用关系。
 
-逐条来源、版本差异和阅读范围见：[原方法文献 1—5](notes/verified_seed_methods.md)、[原综述与报告 6—9](notes/verified_seed_reports.md)、[基础文献](notes/verified_foundations.md)、[核心方法与评测](notes/verified_core_methods.md)。[ICML 2026 官方名录](https://icml.cc/Downloads/2026)也列出 HPD；单篇海报链接本次未成功读取，未补写未核实卷页。
+逐条来源、版本差异和阅读范围见：[原方法文献 1—5](notes/verified_seed_methods.md)、[原综述与报告 6—9](notes/verified_seed_reports.md)、[基础文献](notes/verified_foundations.md)、[核心方法与评测](notes/verified_core_methods.md)。[PMLR 正式出版页](https://proceedings.mlr.press/v306/zhu26av.html)已核实 HPD 的卷页。
 
 ## 后续实验设计需要先确认的事项
 
