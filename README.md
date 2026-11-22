@@ -68,3 +68,9 @@ $env:HF_HOME = 'D:\opdistill\hf-cache'
 `configs/sft_teacher_4b_paired.json` 固定 Qwen3-4B 版本，以 NF4 和 LoRA 训练 64 个更新步；在同一批最多 32 条验证样本上记录原始模型与重载保存的 adapter 后模型的生成结果，验证损失最多使用其中 16 条。测试集不用于此阶段的生成评估。运行方式与前述 SFT 命令相同，替换配置并指定新的空输出目录。该结果用于教师非退化检查，不代表泛化提升。
 
 运行中 `progress.json` 是实时更新的标准 JSON，包含阶段、步数、损失、梯度和显存；完成时还生成 `train_history.json`、`base_predictions.json` 和 `predictions.json` 数组，保留原有 JSONL。失败时进度文件记录错误。
+
+## 在线蒸馏试跑（待执行）
+
+`python -m scripts.run_opd_pilot --config configs/opd_pilot_06b_4b.json --data <数据文件> --adapter <已完成的0.6B SFT adapter目录> --baseline <对应SFT运行目录> --teacher-run <已完成的4B教师SFT运行目录> --output <空目录>`。在 CUDA BF16 环境中使用；输入、模型及 teacher adapter 均须可访问。教师运行必须通过完成状态、64步有限训练、保存后重载、32条验证集配对结果不退化等检查，否则停止。学生控制组与 OPD 从相同已保存 SFT adapter、相同训练 ID 和优化步数开始；两组训练均禁用 dropout，监督 token 预算不相同。评估使用从验证集确定性选出的16条，排除已有学生与教师验证 ID，不使用测试集；先在同一批样本上重评起始学生。生成的工具调用仅作为文本解析，绝不执行。
+
+试跑输出为仓库外的空目录，`progress.json` 在每步或每条评测后原子更新；`status.json` 标示完成或失败。`selection.json`、`provenance.json`、各分支 `trajectories.json`、`predictions.json`、`metrics.json` 和 adapter 可用于追溯；中途失败可能留下不完整记录。该入口尚未在真实师生联合负载下验收，不代表蒸馏或显存结果。
