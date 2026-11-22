@@ -53,3 +53,8 @@ xLAM 的参数类型支持简单类型、`optional` 修饰及安全解析的嵌�
 OPD 配置 `eval_split` 可为 `validation`（缺省，保持原行为）或 `test`；`eval_seed` 缺省为划分 `seed + 3`，固定评测候选顺序。测试模式从学生基线 `split_manifest.json` 的 `tokenization.test.kept_ids` 排除已读取 ID，拒绝空、重复或不属于重建测试划分的排除清单；可用 `expected_prior_test_count` 检查清单数目。验证模式仍排除学生和教师已使用的验证 ID。评测只检查原有完整样本 `max_length`，训练另检查 `max_prompt_tokens`；两者均不按模型结果筛选。`eval_offset` 同样对选择的评测划分生效。
 
 CLI 可选 `--trial-seed <非负整数>`，覆盖配置中的 `trial_seed`；未指定时回退到划分 `seed`。试验种子控制训练 ID 洗牌与训练阶段采样，不改变 `prepare_splits` 使用的划分种子或评测洗牌种子。实际配置写入 `config.json`；`selection.json` 记录划分、试验和评测种子、评测划分、排除及选中 ID。每次运行均独立重新生成起始学生预测，不复用跨运行结果。`configs/opd_06b_4b_heldout.json` 声明 96 个新测试 ID、预期排除 64 个旧 ID、16 次更新及 128 token rollout；试验种子 42/43/44 分别使用独立输出目录。
+
+
+### OPD 可选等监督 token 模式
+
+`match_supervised_tokens` 为布尔值，默认 `false`。启用时，每个样本以生成 token 数（含 EOS）与 SFT 移位后有效标签数的较小值作为配额，使用由 trial seed、更新步与分支经 SHA-256 派生的独立 Python 随机数流无放回均匀抽取位置；输入上下文保持完整。OPD 先运行并记录 `matching.json`，SFT 以相同顺序和初始 adapter 校验并重放配额。该文件及各分支实时 `trajectories.json` 保存原始数量、配额和选中位置：OPD 为从零起算的生成动作索引，SFT 为未移位的标签索引。`training_metrics.json` 的 `target_tokens` 是实际计入损失的位置数；代码校验逐步及总数一致。此控制不匹配计算量或上下文长度。
