@@ -45,3 +45,5 @@ xLAM 的参数类型支持简单类型、`optional` 修饰及安全解析的嵌�
 在线轨迹按学生当前策略采样，`temperature=1`、`top_k=0`、`top_p=1`，rollout 上限与评估上限分开。每条轨迹记录完整提示 ID 和哈希、生成 ID、预测位置及动作的师生 log probability、解析得分、loss 和梯度；EOS 在生成时出现则包含在监督位置内。对长度为 P 的提示和 T 个动作，位置为 `[P-1, P+T-2]`，目标为各位置全词表 `KL(student || teacher)` 的 FP32 均值；教师冻结。首步使用真实轨迹分别对师生验证定长替换目标及后续 token 后的因果不变性，并比较批量和单独选择的位置；固定形状检查失败时停止。截短前缀引起的 logits 与概率偏差作为诊断记录，不单独作为失败条件；实际 BF16 差异与显存消耗仍待测。
 
 输出包括原子更新的严格 JSON `progress.json`、`status.json`、`selection.json`、`provenance.json`、`teacher_gate.json`、`starting_predictions.json` 及 `starting_metrics.json`，以及分支目录下的 `trajectories.json`、`training_metrics.json`、`adapter/`、`predictions.json` 和 `metrics.json`。进度在每步训练和每条评估后更新；失败时保留已有文件并写失败状态，重试须使用新目录。训练及评估分别记录耗时与 CUDA 峰值，评测结果含分子和分母以及相对起始学生的配对计数。该试跑尚待实际执行与验收。
+
+`eval_offset` 为可选非负整数，默认 0；在验证集固定洗牌并排除已有验证 ID 与长度不合格样本之后，跳过前 N 个合格样本，再选取 `eval_samples` 个。`selection.json` 记录偏移值和跳过的 ID；不访问测试集。

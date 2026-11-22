@@ -74,3 +74,5 @@ $env:HF_HOME = 'D:\opdistill\hf-cache'
 `python -m scripts.run_opd_pilot --config configs/opd_pilot_06b_4b.json --data <数据文件> --adapter <已完成的0.6B SFT adapter目录> --baseline <对应SFT运行目录> --teacher-run <已完成的4B教师SFT运行目录> --output <空目录>`。在 CUDA BF16 环境中使用；输入、模型及 teacher adapter 均须可访问。教师运行必须通过完成状态、64步有限训练、保存后重载、32条验证集配对结果不退化等检查，否则停止。学生控制组与 OPD 从相同已保存 SFT adapter、相同训练 ID 和优化步数开始；两组训练均禁用 dropout，监督 token 预算不相同。评估使用从验证集确定性选出的16条，排除已有学生与教师验证 ID，不使用测试集；先在同一批样本上重评起始学生。生成的工具调用仅作为文本解析，绝不执行。
 
 试跑输出为仓库外的空目录，`progress.json` 在每步或每条评测后原子更新；`status.json` 标示完成或失败。`selection.json`、`provenance.json`、各分支 `trajectories.json`、`predictions.json`、`metrics.json` 和 adapter 可用于追溯；中途失败可能留下不完整记录。该入口尚未在真实师生联合负载下验收，不代表蒸馏或显存结果。
+
+配置 `configs/opd_validation_06b_4b.json` 将每组更新步数设为 16、rollout 上限设为 128，并在同一验证选择顺序中跳过前 16 个合格样本后选取 64 条；此配置用于后续验证，实际结果以运行记录为准。

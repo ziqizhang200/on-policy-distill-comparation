@@ -99,19 +99,25 @@ def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
     teacher_excluded = set(teacher_manifest['tokenization']['validation']['kept_ids'])
     candidates = list(splits['validation'])
     random.Random(config['seed'] + 3).shuffle(candidates)
-    test, eval_rejected = [], []
+    test, eval_rejected, eval_skipped = [], [], []
+    offset = config.get('eval_offset', 0)
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise ValueError('eval_offset must be a non-negative integer')
     for sample in candidates:
         if sample['id'] in baseline_excluded or sample['id'] in teacher_excluded:
             continue
         if encode_sample(tokenizer, sample, config['max_length']) is None:
             eval_rejected.append(sample['id'])
             continue
+        if len(eval_skipped) < offset:
+            eval_skipped.append(sample['id'])
+            continue
         test.append((sample, None))
         if len(test) == config['eval_samples']:
             break
     if len(test) != config['eval_samples']:
         raise ValueError('Insufficient independent validation samples')
-    return train, test, rejected, eval_rejected
+    return train, test, rejected, eval_rejected, eval_skipped
 
 
 def validate_teacher_run(path, config, dataset_hash):
@@ -248,7 +254,7 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
     check_tokenizers(student_tok, teacher_tok)
     manifest = json.loads((baseline / 'split_manifest.json').read_text(encoding='utf-8-sig'))
     teacher_manifest = json.loads((teacher_run / 'split_manifest.json').read_text(encoding='utf-8-sig'))
-    train, test, rejected, eval_rejected = selected_samples(config, student_tok, splits, manifest, teacher_manifest)
+    train, test, rejected, eval_rejected, eval_skipped = selected_samples(config, student_tok, splits, manifest, teacher_manifest)
     for sample, _ in train + test:
         if prompt_ids(student_tok, sample) != prompt_ids(teacher_tok, sample):
             raise ValueError('Rendered student/teacher prompt IDs differ')
@@ -259,6 +265,7 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
         'student_prior_train_excluded_ids': manifest['tokenization']['train']['kept_ids'],
         'teacher_train_excluded_ids': teacher_manifest['tokenization']['train']['kept_ids'],
         'rejected_train_ids': rejected, 'rejected_eval_ids': eval_rejected,
+        'eval_offset': config.get('eval_offset', 0), 'eval_offset_skipped_ids': eval_skipped,
         'common_full_sample_max_length': config['max_length'],
         'common_prompt_max_tokens': config['max_prompt_tokens'], 'seed': config['seed']})
     device = torch.device('cuda:0')

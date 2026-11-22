@@ -89,3 +89,21 @@ def test_fixed_shape_causal_smoke_detects_future_leak():
     assert all(item['fixed_shape_causal_max_absolute_logit_difference'] == 0 for item in smoke['checks'])
     with pytest.raises(ValueError, match='causality'):
         smoke_prefix(Model(leak=True), ids, 3, 2)
+
+
+def test_validation_offset_skips_eligible_ids_without_changing_train(monkeypatch):
+    from scripts import run_opd_pilot as runner
+    monkeypatch.setattr(runner, 'encode_sample', lambda tokenizer, sample, length: None if sample['id'] == 15 else {'labels': [1]})
+    monkeypatch.setattr(runner, 'prompt_ids', lambda tokenizer, sample: [1])
+    cfg = {'seed': 42, 'max_steps': 2, 'max_length': 10, 'max_prompt_tokens': 10, 'eval_samples': 4}
+    splits = {'train': [{'id': i} for i in range(10)], 'validation': [{'id': i} for i in range(10, 30)]}
+    manifest = {'tokenization': {'train': {'kept_ids': [0]}, 'validation': {'kept_ids': [10]}}}
+    teacher = {'tokenization': {'train': {'kept_ids': [1]}, 'validation': {'kept_ids': [11]}}}
+    first = runner.selected_samples(cfg, None, splits, manifest, teacher)
+    second = runner.selected_samples({**cfg, 'eval_offset': 4}, None, splits, manifest, teacher)
+    assert [x[0]['id'] for x in first[0]] == [x[0]['id'] for x in second[0]]
+    assert [x[0]['id'] for x in first[1]] == second[4]
+    assert not set(second[4]) & {x[0]['id'] for x in second[1]}
+    for bad in (-1, True, 1.5):
+        with pytest.raises(ValueError, match='eval_offset'):
+            runner.selected_samples({**cfg, 'eval_offset': bad}, None, splits, manifest, teacher)
