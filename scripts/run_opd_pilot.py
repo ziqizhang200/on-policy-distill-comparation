@@ -80,7 +80,8 @@ def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
     candidates = list(splits['train'])
     rng.shuffle(candidates)
     train, rejected = [], []
-    used = set(manifest['tokenization']['train']['kept_ids'])
+    used = (set(manifest['tokenization']['train']['kept_ids']) |
+            set(teacher_manifest['tokenization']['train']['kept_ids']))
     for sample in candidates:
         if sample['id'] in used:
             continue
@@ -237,6 +238,7 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
         'student_prior_validation_excluded_ids': manifest['tokenization']['validation']['kept_ids'],
         'teacher_validation_excluded_ids': teacher_manifest['tokenization']['validation']['kept_ids'],
         'student_prior_train_excluded_ids': manifest['tokenization']['train']['kept_ids'],
+        'teacher_train_excluded_ids': teacher_manifest['tokenization']['train']['kept_ids'],
         'rejected_train_ids': rejected, 'rejected_eval_ids': eval_rejected,
         'common_full_sample_max_length': config['max_length'],
         'common_prompt_max_tokens': config['max_prompt_tokens'], 'seed': config['seed']})
