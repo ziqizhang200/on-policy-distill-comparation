@@ -75,7 +75,7 @@ def release(*models):
     torch.cuda.empty_cache()
 
 
-def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
+def selected_samples(config, tokenizer, splits, manifest, teacher_manifest, prior_test_ids=()):
     rng = random.Random(config.get('trial_seed', config['seed']))
     candidates = list(splits['train'])
     rng.shuffle(candidates)
@@ -106,6 +106,11 @@ def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
                 (expected is not None and len(baseline_ids) != expected)):
             raise ValueError('Prior test exclusion manifest is missing, duplicated or incomplete')
     baseline_excluded = set(baseline_ids)
+    if prior_test_ids and eval_split != 'test':
+        raise ValueError('Additional test exclusions require test evaluation')
+    if eval_split == 'test' and not set(prior_test_ids).issubset({sample['id'] for sample in splits['test']}):
+        raise ValueError('Additional exclusion IDs do not belong to test split')
+    baseline_excluded.update(prior_test_ids)
     teacher_excluded = (set(teacher_manifest['tokenization']['validation']['kept_ids'])
                         if eval_split == 'validation' else set())
     candidates = list(splits[eval_split])
@@ -129,6 +134,52 @@ def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
     if len(test) != config['eval_samples']:
         raise ValueError(f'Insufficient independent {eval_split} samples')
     return train, test, rejected, eval_rejected, eval_skipped
+
+
+def validate_test_exclusions(paths, config, dataset_hash, baseline_manifest_hash, test_ids):
+    """Validate completed prior runs and return their test IDs and provenance."""
+    if not paths and config.get('require_test_exclusions', False):
+        raise ValueError('At least one completed test exclusion run is required')
+    required_hash = config.get('required_test_selection_sha256')
+    seen_hashes, excluded, evidence = set(), set(), []
+    for path in paths:
+        path = Path(path)
+        def read(name):
+            return json.loads((path / name).read_text(encoding='utf-8-sig'))
+        status, prior_config, provenance, selection = (read(name) for name in
+            ('status.json', 'config.json', 'provenance.json', 'selection.json'))
+        if status.get('status') != 'complete':
+            raise ValueError('Prior test run is not complete')
+        keys = ('student_id', 'student_revision', 'teacher_id', 'teacher_revision',
+                'dataset_source', 'dataset_revision', 'seed', 'validation_fraction', 'test_fraction')
+        if any(prior_config.get(k) != config.get(k) for k in keys):
+            raise ValueError('Prior test dataset or split identity differs')
+        if (provenance.get('dataset_sha256') != dataset_hash or
+                provenance.get('baseline_files_sha256', {}).get('split_manifest.json') != baseline_manifest_hash):
+            raise ValueError('Prior test data or baseline split manifest hash differs')
+        if provenance.get('git', {}).get('dirty') is not False or not provenance.get('git', {}).get('commit'):
+            raise ValueError('Prior test run lacks clean code provenance')
+        ids = selection.get('eval_ids')
+        if (selection.get('eval_split') != 'test' or not isinstance(ids, list) or not ids or
+                len(ids) != len(set(ids)) or not set(ids).issubset(set(test_ids)) or
+                len(ids) != prior_config.get('eval_samples')):
+            raise ValueError('Prior test selection is invalid')
+        prediction_files = ('starting_predictions.json', 'opd/predictions.json', 'continued_sft/predictions.json')
+        for name in prediction_files:
+            if [item['id'] for item in read(name)] != ids:
+                raise ValueError('Prior test predictions do not match selection')
+        digest = sha256(path / 'selection.json')
+        seen_hashes.add(digest)
+        excluded.update(ids)
+        evidence.append({'path': str(path.resolve()), 'selection_sha256': digest,
+                         'status_sha256': sha256(path / 'status.json'),
+                         'config_sha256': sha256(path / 'config.json'),
+                         'provenance_sha256': sha256(path / 'provenance.json'),
+                         'predictions_sha256': {name: sha256(path / name) for name in prediction_files},
+                         'eval_ids': ids})
+    if required_hash and required_hash not in seen_hashes:
+        raise ValueError('Required prior test selection is missing')
+    return excluded, evidence
 
 
 def validate_teacher_run(path, config, dataset_hash):
@@ -236,7 +287,7 @@ def mask_sft_labels(encoded, selected):
     return {**encoded, 'labels': [value if i in selected else -100 for i, value in enumerate(labels)]}
 
 
-def run(config, data_path, adapter, baseline, teacher_run, output):
+def run(config, data_path, adapter, baseline, teacher_run, output, exclude_test_runs=()):
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         raise RuntimeError('CUDA with BF16 support is required')
     if output.exists() and any(output.iterdir()):
@@ -249,6 +300,10 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
             raise ValueError(f'{key} must be a non-negative integer')
     if not isinstance(config.get('match_supervised_tokens', False), bool):
         raise ValueError('match_supervised_tokens must be boolean')
+    if not isinstance(config.get('require_test_exclusions', False), bool):
+        raise ValueError('require_test_exclusions must be boolean')
+    if (exclude_test_runs or config.get('require_test_exclusions') or config.get('required_test_selection_sha256')) and config.get('eval_split', 'validation') != 'test':
+        raise ValueError('Test exclusion runs require test evaluation')
     if config.get('eval_split', 'validation') not in ('validation', 'test'):
         raise ValueError('eval_split must be validation or test')
     if config['quantization'] != 'nf4' or config['learning_rate'] <= 0:
@@ -298,13 +353,17 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
     check_tokenizers(student_tok, teacher_tok)
     manifest = json.loads((baseline / 'split_manifest.json').read_text(encoding='utf-8-sig'))
     teacher_manifest = json.loads((teacher_run / 'split_manifest.json').read_text(encoding='utf-8-sig'))
-    train, test, rejected, eval_rejected, eval_skipped = selected_samples(config, student_tok, splits, manifest, teacher_manifest)
+    excluded, exclusion_evidence = validate_test_exclusions(exclude_test_runs, config, data_hash,
+        sha256(baseline / 'split_manifest.json'), {sample['id'] for sample in splits['test']})
+    train, test, rejected, eval_rejected, eval_skipped = selected_samples(config, student_tok, splits, manifest, teacher_manifest, excluded)
     for sample, _ in train + test:
         if prompt_ids(student_tok, sample) != prompt_ids(teacher_tok, sample):
             raise ValueError('Rendered student/teacher prompt IDs differ')
     write_json(output / 'selection.json', {'train_ids': [x[0]['id'] for x in train],
         'eval_split': config.get('eval_split', 'validation'), 'eval_ids': [x[0]['id'] for x in test],
         'student_prior_eval_excluded_ids': manifest['tokenization'][config.get('eval_split', 'validation')]['kept_ids'],
+        'additional_test_exclusion_runs': exclusion_evidence,
+        'additional_test_excluded_ids': sorted(excluded),
         'student_prior_validation_excluded_ids': manifest['tokenization']['validation']['kept_ids'],
         'teacher_validation_excluded_ids': teacher_manifest['tokenization']['validation']['kept_ids'],
         'student_prior_train_excluded_ids': manifest['tokenization']['train']['kept_ids'],
@@ -499,12 +558,13 @@ def main():
     for flag in ('config', 'data', 'adapter', 'baseline', 'teacher-run', 'output'):
         parser.add_argument('--' + flag, type=Path, required=True)
     parser.add_argument('--trial-seed', type=int, help='Override trial seed without changing the data split or evaluation seed')
+    parser.add_argument('--exclude-test-run', type=Path, action='append', default=[], help='Completed test run to exclude; repeat as needed')
     args = parser.parse_args()
     try:
         config = json.loads(args.config.read_text(encoding='utf-8-sig'))
         if args.trial_seed is not None:
             config['trial_seed'] = args.trial_seed
-        run(config, args.data, args.adapter, args.baseline, args.teacher_run, args.output)
+        run(config, args.data, args.adapter, args.baseline, args.teacher_run, args.output, args.exclude_test_run)
     except Exception as exc:
         if (args.output / 'progress.json').exists():
             progress = json.loads((args.output / 'progress.json').read_text(encoding='utf-8-sig'))

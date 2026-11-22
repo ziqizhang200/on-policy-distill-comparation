@@ -172,3 +172,52 @@ def test_matching_masks_only_selected_losses():
     assert student.grad[[0, 3]].abs().sum() > 0
     with pytest.raises(ValueError):
         mask_sft_labels(encoded, [0])
+
+
+def test_completed_test_exclusions_fail_closed_and_select_disjoint(tmp_path, monkeypatch):
+    from scripts import run_opd_pilot as runner
+    cfg = {'student_id': 'student', 'student_revision': 's', 'teacher_id': 'teacher', 'teacher_revision': 't',
+           'dataset_source': 'data', 'dataset_revision': 'v', 'seed': 42,
+           'validation_fraction': .1, 'test_fraction': .1, 'eval_split': 'test',
+           'require_test_exclusions': True, 'eval_seed': 45, 'eval_samples': 3,
+           'expected_prior_test_count': 1, 'max_steps': 2, 'max_length': 10, 'max_prompt_tokens': 10}
+    prior = tmp_path / 'prior'
+    prior.mkdir()
+    def write(name, value):
+        p = prior / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(value), encoding='utf-8')
+    write('status.json', {'status': 'complete'})
+    write('config.json', {**cfg, 'eval_samples': 2})
+    write('provenance.json', {'dataset_sha256': 'datahash', 'baseline_files_sha256': {'split_manifest.json': 'splithash'},
+                              'git': {'commit': 'abc', 'dirty': False}})
+    write('selection.json', {'eval_split': 'test', 'eval_ids': [101, 102]})
+    for name in ('starting_predictions.json', 'opd/predictions.json', 'continued_sft/predictions.json'):
+        write(name, [{'id': 101}, {'id': 102}])
+    cfg['required_test_selection_sha256'] = runner.sha256(prior / 'selection.json')
+    test_ids = set(range(100, 115))
+    excluded, evidence = runner.validate_test_exclusions([prior], cfg, 'datahash', 'splithash', test_ids)
+    assert excluded == {101, 102} and evidence[0]['selection_sha256'] == cfg['required_test_selection_sha256']
+    monkeypatch.setattr(runner, 'encode_sample', lambda *args: {'labels': [1]})
+    monkeypatch.setattr(runner, 'prompt_ids', lambda *args: [1])
+    splits = {'train': [{'id': i} for i in range(10)], 'test': [{'id': i} for i in sorted(test_ids)]}
+    manifest = {'tokenization': {'train': {'kept_ids': [0]}, 'test': {'kept_ids': [100]}}}
+    teacher = {'tokenization': {'train': {'kept_ids': [1]}}}
+    choices = [runner.selected_samples({**cfg, 'trial_seed': seed}, None, splits, manifest, teacher, excluded)[1] for seed in (42, 43, 44)]
+    ids = [[r[0]['id'] for r in group] for group in choices]
+    assert ids[0] == ids[1] == ids[2] and not set(ids[0]) & {100, 101, 102}
+    with pytest.raises(ValueError, match='required'):
+        runner.validate_test_exclusions([], cfg, 'datahash', 'splithash', test_ids)
+    with pytest.raises(ValueError, match='hash differs'):
+        runner.validate_test_exclusions([prior], cfg, 'wrong', 'splithash', test_ids)
+    with pytest.raises(ValueError, match='hash differs'):
+        runner.validate_test_exclusions([prior], cfg, 'datahash', 'wrong', test_ids)
+    with pytest.raises(ValueError, match='selection is missing'):
+        runner.validate_test_exclusions([prior], {**cfg, 'required_test_selection_sha256': 'wrong'}, 'datahash', 'splithash', test_ids)
+    write('status.json', {'status': 'failed'})
+    with pytest.raises(ValueError, match='not complete'):
+        runner.validate_test_exclusions([prior], cfg, 'datahash', 'splithash', test_ids)
+    write('status.json', {'status': 'complete'})
+    write('selection.json', {'eval_split': 'test', 'eval_ids': [101, 101]})
+    with pytest.raises(ValueError, match='selection is invalid'):
+        runner.validate_test_exclusions([prior], cfg, 'datahash', 'splithash', test_ids)

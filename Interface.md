@@ -54,6 +54,8 @@ OPD 配置 `eval_split` 可为 `validation`（缺省，保持原行为）或 `te
 
 CLI 可选 `--trial-seed <非负整数>`，覆盖配置中的 `trial_seed`；未指定时回退到划分 `seed`。试验种子控制训练 ID 洗牌与训练阶段采样，不改变 `prepare_splits` 使用的划分种子或评测洗牌种子。实际配置写入 `config.json`；`selection.json` 记录划分、试验和评测种子、评测划分、排除及选中 ID。每次运行均独立重新生成起始学生预测，不复用跨运行结果。`configs/opd_06b_4b_heldout.json` 声明 96 个新测试 ID、预期排除 64 个旧 ID、16 次更新及 128 token rollout；试验种子 42/43/44 分别使用独立输出目录。
 
+测试模式可重复传入 `--exclude-test-run <已完成运行目录>`。每个来源均核对完成状态、师生模型和数据标识及修订、划分参数、数据 SHA-256、学生基线划分清单 SHA-256、干净代码来源、测试 ID 唯一性及其所属划分，并校验起始、OPD 和继续 SFT 三组预测 ID 与清单一致。所有来源 ID 取并集并排除；`selection.json` 记录各来源路径及状态、配置、来源、选择文件哈希和 ID。配置 `require_test_exclusions` 可要求至少一个来源，`required_test_selection_sha256` 可要求特定选择清单。`configs/opd_matched_tokens_heldout_06b_4b.json` 锁定先前 seed 42 的 96 条选择清单；三个已完成种子的评测 ID 在准备时核对一致，另排除基线 64 条。该方案为待确认的 32 步、64 条同数据集未用测试样本，评测种子 45、偏移 0、试验种子 42/43/44；未运行或选择新测试 ID，预训练污染未知，不能称作外部基准。
+
 
 ### OPD 可选等监督 token 模式
 
