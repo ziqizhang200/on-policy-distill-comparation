@@ -44,21 +44,36 @@ def tensor_batch(encoded, device):
     return {"input_ids": ids, "attention_mask": torch.ones_like(ids), "labels": labels}
 
 
-def prepare_encoded(tokenizer, splits, max_length):
+def prepare_encoded(tokenizer, splits, max_length, limits, seed):
+    """Select a reproducible bounded set of usable examples from each split."""
     encoded = {}
-    dropped = {}
+    audit = {}
     for name, samples in splits.items():
         encoded[name] = []
-        dropped[name] = []
-        for sample in samples:
+        candidates = list(samples)
+        offset = {"train": 0, "validation": 1, "test": 2}[name]
+        random.Random(seed + offset).shuffle(candidates)
+        overlength_ids = []
+        examined = 0
+        for sample in candidates:
+            examined += 1
             item = encode_sample(tokenizer, sample, max_length)
             if item is None:
-                dropped[name].append(sample["id"])
+                overlength_ids.append(sample["id"])
             else:
                 encoded[name].append((sample, item))
+                if len(encoded[name]) == limits[name]:
+                    break
         if not encoded[name]:
             raise ValueError(f"No {name} examples fit within max_length")
-    return encoded, dropped
+        audit[name] = {
+            "normalized_split_total": len(samples),
+            "inspected": examined,
+            "kept_ids": [sample["id"] for sample, _ in encoded[name]],
+            "overlength_ids": overlength_ids,
+            "uninspected": len(samples) - examined,
+        }
+    return encoded, audit
 
 
 def git_state():
@@ -136,6 +151,8 @@ def run(config, data_path, output):
     write_json(output / "config.json", config)
     provenance = {
         "git": git_state(), "dataset_path": str(data_path.resolve()),
+        "output_path": str(output.resolve()), "working_directory": str(Path.cwd()),
+        "command_argv": sys.orig_argv,
         "dataset_sha256": dataset_hash, "dataset_source": config["dataset_source"],
         "dataset_revision": config["dataset_revision"], "python": sys.version,
         "platform": platform.platform(), "gpu": torch.cuda.get_device_name(device),
@@ -151,9 +168,10 @@ def run(config, data_path, output):
                                       validation_fraction=config["validation_fraction"],
                                       test_fraction=config["test_fraction"])
     tokenizer = AutoTokenizer.from_pretrained(config["model_id"], revision=config["model_revision"])
-    encoded, dropped = prepare_encoded(tokenizer, splits, config["max_length"])
-    manifest["kept_ids"] = {name: [sample["id"] for sample, _ in rows] for name, rows in encoded.items()}
-    manifest["overlength_ids"] = dropped
+    limits = {"train": config["max_steps"] * config["gradient_accumulation_steps"],
+              "validation": config["max_validation_samples"], "test": config["max_eval_samples"]}
+    encoded, audit = prepare_encoded(tokenizer, splits, config["max_length"], limits, config["seed"])
+    manifest["tokenization"] = audit
     write_json(output / "split_manifest.json", manifest)
     model = load_model(config)
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=config["learning_rate"])

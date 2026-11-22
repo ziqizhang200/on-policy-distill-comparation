@@ -20,8 +20,10 @@
 
 原始行包括 `id`（可省略）、`query`、`tools`、`answers`。`tools` 和 `answers` 可以是 JSON 字符串或对应数组；支持单个或多个有序调用。数据模块 `read_rows(path)` 返回原始行，`prepare_splits(rows, *, seed, validation_fraction, test_fraction)` 返回划分字典和统计清单。规范化行包含 `id`、`query`、OpenAI 风格 `tools`、有序 `calls`，每个调用包含 `name` 与对象形式的 `arguments`。不符合处理要求的行和完全重复行被计数，统计清单保留排除原因。
 
-划分将规范化 query 相同或完整工具集合签名相同的行放进同一连通分组，分组少于三个时报错。实际分组大小可能使比例偏离配置，清单保留实际分组数、最大组大小和样本计数；此规则未检测语义近重复。超过 `max_length` 的完整样本被排除而非截断，并在清单中记录 ID；训练、验证或测试集排除后为空时停止。训练标签对输入提示设为 `-100`，仅对 assistant 响应计算损失。
+xLAM 的参数类型支持简单类型、`optional` 修饰及安全解析的嵌套 List、Dict、Tuple、Union、Optional。解析不执行类型表达式；Callable、set 等不支持的类型使所在行被排除并计数。显式 `required` 布尔值决定参数是否必需，没有声明时不推断必需。只有与转换后类型兼容且可序列化的显式默认值会保留，不兼容的默认值被省略并在 `normalization_diagnostics_valid_rows` 中计数；类型文本中声明默认值也计数，但不推断其值。
+
+划分将规范化 query 相同或完整工具集合签名相同的行放进同一连通分组，分组少于三个时报错。大于两个留出集目标大小的组优先放入训练集，同时保证三个划分各有分组。实际分组大小可能使比例偏离配置，清单保留实际分组数、最大组大小和样本计数；此规则未检测语义近重复，单个工具仍可出现在不同划分。各划分使用独立的固定种子顺序，仅检查满足试跑数量所需的样本，训练最多选 `max_steps * gradient_accumulation_steps` 条，验证和测试分别使用各自的样本上限。检查到的超长完整样本被排除而非截断，清单 `tokenization` 按划分记录总数、已检查数、保留及超长 ID、未检查数；训练、验证或测试集检查后为空时停止。训练标签对输入提示设为 `-100`，仅对 assistant 响应计算损失。
 
 `score_output(text, sample)` 接受由完整 `<tool_call>...</tool_call>` 块组成的文本，返回 `structure_valid`、`function_name_match`、`arguments_match` 和 `joint_match` 布尔值。名称和参数分别按调用顺序精确比较，联合匹配要求两者均匹配；全空白文本仅在目标调用为空时视作有效的空调用序列。格式检查验证调用块及 JSON 对象结构，不验证函数是否属于工具列表、参数是否符合工具 schema、工具执行结果或参数语义正确性，也未实现 BFCL 官方评测。
 
-成功运行的输出目录包含 `status.json`、`config.json`、`provenance.json`、`split_manifest.json`、`train_log.jsonl`、`adapter/`、`predictions.jsonl` 和 `metrics.json`。`status.json` 在开始时记录 `incomplete`，所有步骤成功后更新为 `complete`。其中 provenance 记录 Git commit 与 dirty 状态、数据路径和 SHA-256、Python、平台、GPU、CUDA 及依赖版本，配置文件记录预算和模型版本。日志记录更新步、损失、梯度范数与耗时；预测逐行保存原始输出、目标、各项布尔分数、生成 token 数、是否到达 EOS 及是否达到 token 上限；metrics 汇总验证损失、评测分子/分母/比例、峰值显存与耗时。dirty 状态不包含代码差异，正式结果应从已提交且可追溯的代码运行，并另存完整命令。
+成功运行的输出目录包含 `status.json`、`config.json`、`provenance.json`、`split_manifest.json`、`train_log.jsonl`、`adapter/`、`predictions.jsonl` 和 `metrics.json`。`status.json` 在开始时记录 `incomplete`，所有步骤成功后更新为 `complete`。其中 provenance 记录 Git commit 与 dirty 状态、输入输出路径、工作目录、命令参数、数据 SHA-256、Python、平台、GPU、CUDA 及依赖版本，配置文件记录预算和模型版本。日志记录更新步、损失、梯度范数与耗时；预测逐行保存原始输出、目标、各项布尔分数、生成 token 数、是否到达 EOS 及是否达到 token 上限；metrics 汇总验证损失、评测分子/分母/比例、峰值显存与耗时。dirty 状态不包含代码差异，正式结果应从已提交且可追溯的代码运行。

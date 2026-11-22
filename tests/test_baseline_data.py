@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.baseline_data import prepare_splits, read_rows, score_output
+from src.baseline_data import _native_schema, prepare_splits, read_rows, score_output
 
 
 def row(number, *, query=None, tool=None):
@@ -68,6 +68,44 @@ class BaselineDataTests(unittest.TestCase):
         invalid_type["tools"] = [tool]
         _, manifest = prepare_splits([row(1), row(2), row(3), duplicated_tool, invalid_type], seed=0, validation_fraction=.2, test_fraction=.2)
         self.assertEqual(manifest["invalid_rows"], 2)
+
+    def test_oversized_group_stays_in_training(self):
+        rows = [row(i, tool="shared") for i in range(10)] + [row(i) for i in range(10, 18)]
+        splits, manifest = prepare_splits(rows, seed=7, validation_fraction=.2, test_fraction=.2)
+        self.assertEqual(manifest["largest_group_size"], 10)
+        self.assertTrue({sample["id"] for sample in splits["train"]}.issuperset(range(10)))
+        self.assertTrue(all(splits.values()))
+        self.assertEqual(prepare_splits(rows, seed=7, validation_fraction=.2, test_fraction=.2), (splits, manifest))
+
+    def test_native_type_annotations_and_defaults(self):
+        self.assertEqual(_native_schema("int, optional")[0], {"type": "integer"})
+        self.assertEqual(_native_schema("List[Union[int, float]]")[0], {
+            "type": "array", "items": {"anyOf": [{"type": "integer"}, {"type": "number"}]}})
+        self.assertEqual(_native_schema("Tuple[float, float]")[0], {
+            "type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}],
+            "minItems": 2, "maxItems": 2})
+        self.assertEqual(_native_schema("Dict[str, Optional[List[int]]]")[0], {
+            "type": "object", "additionalProperties": {"anyOf": [
+                {"type": "array", "items": {"type": "integer"}}, {"type": "null"}]}})
+        for annotation in ("Callable[[float], float]", "set", "__import__('os')", "List[int, str]", "int, optional, bad"):
+            with self.subTest(annotation=annotation), self.assertRaises(ValueError):
+                _native_schema(annotation)
+        sample = row(1)
+        tool = json.loads(sample["tools"])[0]
+        tool["parameters"] = {
+            "count": {"type": "int, optional", "default": 3, "required": True},
+            "items": {"type": "List[int]", "default": [1, 2]},
+            "bad_default": {"type": "int", "default": "3"},
+        }
+        sample["tools"] = [tool]
+        splits, manifest = prepare_splits([sample, row(2), row(3)], seed=0, validation_fraction=.2, test_fraction=.2)
+        normalized = next(s for values in splits.values() for s in values if s["id"] == 1)
+        schema = normalized["tools"][0]["function"]["parameters"]
+        self.assertEqual(schema["required"], ["count"])
+        self.assertEqual(schema["properties"]["count"]["default"], 3)
+        self.assertEqual(schema["properties"]["items"]["default"], [1, 2])
+        self.assertNotIn("default", schema["properties"]["bad_default"])
+        self.assertEqual(manifest["normalization_diagnostics_valid_rows"]["incompatible_default_fields_omitted"], 1)
 
     def test_strict_ordered_scoring(self):
         sample = {"calls": [{"name": "a", "arguments": {"x": 1}}, {"name": "b", "arguments": {}}]}

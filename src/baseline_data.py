@@ -1,5 +1,6 @@
 """Prepare xLAM-style function-calling data and score generated calls."""
 
+import ast
 import json
 import random
 import re
@@ -28,6 +29,14 @@ def _validate_schema(schema):
         _validate_schema(child)
     if "items" in schema:
         _validate_schema(schema["items"])
+    if isinstance(schema.get("additionalProperties"), dict):
+        _validate_schema(schema["additionalProperties"])
+    for key in ("anyOf", "prefixItems"):
+        if key in schema:
+            if not isinstance(schema[key], list) or not schema[key]:
+                raise ValueError("invalid composite JSON Schema")
+            for child in schema[key]:
+                _validate_schema(child)
     required = schema.get("required", [])
     if not isinstance(required, list) or any(not isinstance(name, str) or name not in properties for name in required):
         raise ValueError("invalid required properties")
@@ -54,7 +63,83 @@ _TYPES = {
 }
 
 
-def _tools(value):
+def _type_schema(expression):
+    """Translate a restricted Python type annotation without executing it."""
+    if isinstance(expression, ast.Name):
+        kind = expression.id.lower()
+        if kind in _TYPES:
+            return {"type": _TYPES[kind]}
+        if kind in ("none", "nonetype"):
+            return {"type": "null"}
+    if isinstance(expression, ast.Constant) and expression.value is None:
+        return {"type": "null"}
+    if not isinstance(expression, ast.Subscript) or not isinstance(expression.value, ast.Name):
+        raise ValueError("unsupported parameter type")
+    name = expression.value.id.lower()
+    args = expression.slice.elts if isinstance(expression.slice, ast.Tuple) else [expression.slice]
+    if name == "list" and len(args) == 1:
+        return {"type": "array", "items": _type_schema(args[0])}
+    if name == "dict" and len(args) == 2 and isinstance(args[0], ast.Name) and args[0].id.lower() in ("str", "string"):
+        return {"type": "object", "additionalProperties": _type_schema(args[1])}
+    if name == "tuple" and args:
+        items = [_type_schema(arg) for arg in args]
+        return {"type": "array", "prefixItems": items, "minItems": len(items), "maxItems": len(items)}
+    if name == "union" and len(args) >= 2:
+        return {"anyOf": [_type_schema(arg) for arg in args]}
+    if name == "optional" and len(args) == 1:
+        return {"anyOf": [_type_schema(args[0]), {"type": "null"}]}
+    raise ValueError("unsupported parameter type")
+
+
+def _native_schema(annotation):
+    if not isinstance(annotation, str):
+        raise ValueError("unsupported parameter type")
+    depth = 0
+    split = len(annotation)
+    for index, character in enumerate(annotation):
+        if character == "[":
+            depth += 1
+        elif character == "]":
+            depth -= 1
+        elif character == "," and depth == 0:
+            split = index
+            break
+    qualifier = annotation[split:]
+    if qualifier and not re.fullmatch(r"(?:\s*,\s*optional)?(?:\s*,\s*default\s*(?:=|\s)\s*.+)?", qualifier, re.IGNORECASE):
+        raise ValueError("unsupported parameter type qualifier")
+    try:
+        expression = ast.parse(annotation[:split].strip(), mode="eval").body
+    except (SyntaxError, ValueError):
+        raise ValueError("unsupported parameter type") from None
+    return _type_schema(expression), bool(re.search(r"\bdefault\b", qualifier, re.IGNORECASE))
+
+
+def _default_matches(value, schema):
+    if "anyOf" in schema:
+        return any(_default_matches(value, option) for option in schema["anyOf"])
+    kind = schema.get("type")
+    if kind == "null":
+        return value is None
+    if kind == "boolean":
+        return isinstance(value, bool)
+    if kind == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if kind == "string":
+        return isinstance(value, str)
+    if kind == "object":
+        return isinstance(value, dict) and (not isinstance(schema.get("additionalProperties"), dict) or all(_default_matches(item, schema["additionalProperties"]) for item in value.values()))
+    if kind == "array":
+        if not isinstance(value, list):
+            return False
+        if "prefixItems" in schema:
+            return len(value) == len(schema["prefixItems"]) and all(_default_matches(item, item_schema) for item, item_schema in zip(value, schema["prefixItems"]))
+        return "items" not in schema or all(_default_matches(item, schema["items"]) for item in value)
+    return False
+
+
+def _tools(value, diagnostics):
     value = _decode(value)
     if not isinstance(value, list) or not value:
         raise ValueError("tools must be a nonempty array")
@@ -82,14 +167,24 @@ def _tools(value):
             for key, field in parameters.items():
                 if not isinstance(key, str) or not isinstance(field, dict):
                     raise ValueError("invalid parameter definition")
-                kind = field.get("type")
-                if not isinstance(kind, str) or kind.lower() not in _TYPES:
-                    raise ValueError("unsupported parameter type")
+                field_schema, annotation_default = _native_schema(field.get("type"))
+                if annotation_default:
+                    diagnostics["type_annotation_default_fields"] += 1
                 is_required = field.get("required", False)
                 if not isinstance(is_required, bool):
                     raise ValueError("parameter required must be boolean")
-                properties[key] = {k: v for k, v in field.items() if k != "required"}
-                properties[key]["type"] = _TYPES[kind.lower()]
+                properties[key] = {k: v for k, v in field.items() if k not in ("required", "type", "default")}
+                properties[key].update(field_schema)
+                if "default" in field:
+                    try:
+                        _canonical(field["default"])
+                        compatible = _default_matches(field["default"], field_schema)
+                    except (ValueError, TypeError):
+                        compatible = False
+                    if compatible:
+                        properties[key]["default"] = field["default"]
+                    else:
+                        diagnostics["incompatible_default_fields_omitted"] += 1
                 if is_required:
                     required.append(key)
             schema = {"type": "object", "properties": properties}
@@ -100,13 +195,13 @@ def _tools(value):
     return tools
 
 
-def _normalize(row, index):
+def _normalize(row, index, diagnostics):
     if not isinstance(row, dict):
         raise ValueError("row must be an object")
     query = row.get("query")
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a nonempty string")
-    tools = _tools(row.get("tools"))
+    tools = _tools(row.get("tools"), diagnostics)
     names = {tool["function"]["name"] for tool in tools}
     answers = _decode(row.get("answers"))
     if not isinstance(answers, list):
@@ -132,16 +227,19 @@ def prepare_splits(rows, *, seed, validation_fraction, test_fraction):
     samples = []
     seen = set()
     invalid = Counter()
+    diagnostics = Counter()
     duplicates = 0
     input_rows = 0
     for index, row in enumerate(rows):
         input_rows += 1
         try:
-            sample = _normalize(row, index)
+            row_diagnostics = Counter()
+            sample = _normalize(row, index, row_diagnostics)
             key = _canonical({k: sample[k] for k in ("query", "tools", "calls")})
         except (ValueError, TypeError, KeyError) as exc:
             invalid[str(exc)] += 1
             continue
+        diagnostics.update(row_diagnostics)
         if key in seen:
             duplicates += 1
             continue
@@ -176,12 +274,14 @@ def prepare_splits(rows, *, seed, validation_fraction, test_fraction):
     group_counts = {key: 0 for key in splits}
     targets = {"validation": len(samples) * validation_fraction, "test": len(samples) * test_fraction}
     for index, batch in enumerate(batches):
-        if index == 0:
-            split = "validation"
-        elif index == 1:
-            split = "test"
-        elif index == 2:
+        empty = [name for name in ("validation", "test", "train") if not group_counts[name]]
+        remaining = len(batches) - index
+        if empty and remaining == len(empty):
+            split = empty[0]
+        elif len(batch) > max(targets.values()):
             split = "train"
+        elif empty:
+            split = empty[0]
         else:
             deficits = {key: targets[key] - len(splits[key]) for key in targets}
             split = max(deficits, key=deficits.get)
@@ -192,6 +292,7 @@ def prepare_splits(rows, *, seed, validation_fraction, test_fraction):
     manifest = {
         "input_rows": input_rows, "valid_rows": input_rows - sum(invalid.values()),
         "invalid_rows": sum(invalid.values()), "invalid_reasons": dict(invalid),
+        "normalization_diagnostics_valid_rows": dict(diagnostics),
         "duplicate_rows": duplicates, "unique_rows": len(samples),
         "group_count": len(batches), "largest_group_size": max(map(len, batches)),
         "split_counts": {key: len(value) for key, value in splits.items()},

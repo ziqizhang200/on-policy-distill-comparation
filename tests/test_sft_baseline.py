@@ -30,7 +30,27 @@ class BaselineTests(unittest.TestCase):
     def test_overlength_exclusion_and_empty_split(self):
         self.assertIsNone(encode_sample(Tokenizer(), SAMPLE, 5))
         with self.assertRaisesRegex(ValueError, "No train"):
-            prepare_encoded(Tokenizer(), {"train": [SAMPLE]}, 5)
+            prepare_encoded(Tokenizer(), {"train": [SAMPLE]}, 5, {"train": 1}, 42)
+
+    def test_bounded_scan_and_seed(self):
+        samples = [{**SAMPLE, "id": i} for i in range(10)]
+
+        def encode(_tokenizer, sample, _max_length):
+            if sample["id"] % 2 == 0:
+                return None
+            return {"input_ids": [1, 99], "labels": [-100, 99]}
+
+        with patch("scripts.run_sft_baseline.encode_sample", side_effect=encode):
+            encoded, audit = prepare_encoded(Tokenizer(), {"train": samples}, 6, {"train": 2}, 42)
+            repeat, repeat_audit = prepare_encoded(Tokenizer(), {"train": samples}, 6, {"train": 2}, 42)
+            self.assertEqual(encoded, repeat)
+            self.assertEqual(audit, repeat_audit)
+            self.assertEqual(len(encoded["train"]), 2)
+            self.assertEqual(audit["train"]["inspected"], 2 + len(audit["train"]["overlength_ids"]))
+            self.assertEqual(audit["train"]["uninspected"], 10 - audit["train"]["inspected"])
+            exhausted, exhausted_audit = prepare_encoded(Tokenizer(), {"train": samples}, 6, {"train": 8}, 42)
+            self.assertEqual(len(exhausted["train"]), 5)
+            self.assertEqual(exhausted_audit["train"]["uninspected"], 0)
 
     def test_bad_prefix_or_missing_end_rejected(self):
         tokenizer = Tokenizer()
