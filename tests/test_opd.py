@@ -67,3 +67,25 @@ def test_teacher_gate_rejects_regression_and_incomplete(tmp_path):
     write('status.json', {'status': 'incomplete'})
     with pytest.raises(ValueError, match='incomplete'):
         validate_teacher_run(tmp_path, cfg, 'hash')
+
+
+def test_fixed_shape_causal_smoke_detects_future_leak():
+    from types import SimpleNamespace
+    from scripts.run_opd_pilot import smoke_prefix
+    class Model:
+        def __init__(self, leak=False):
+            self.leak = leak
+        def __call__(self, input_ids, use_cache, logits_to_keep):
+            x = input_ids.float()
+            if self.leak:
+                x = x + x.sum(dim=1, keepdim=True)
+            else:
+                x = x.cumsum(dim=1)
+            logits = torch.stack((x, -x, x * .25, x * .5, x * .75, x * .1, x * .2, x * .3), dim=-1)
+            return SimpleNamespace(logits=logits[:, -logits_to_keep:] if isinstance(logits_to_keep, int) else logits[:, logits_to_keep])
+    ids = torch.tensor([[1, 2, 3, 4, 5]])
+    smoke = smoke_prefix(Model(), ids, 3, 2)
+    assert [item['logit_position'] for item in smoke['checks']] == [2, 3]
+    assert all(item['fixed_shape_causal_max_absolute_logit_difference'] == 0 for item in smoke['checks'])
+    with pytest.raises(ValueError, match='causality'):
+        smoke_prefix(Model(leak=True), ids, 3, 2)

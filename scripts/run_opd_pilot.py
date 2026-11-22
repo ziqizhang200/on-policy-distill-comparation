@@ -158,20 +158,39 @@ def validate_teacher_run(path, config, dataset_hash):
 
 
 def smoke_prefix(model, ids, prompt_length, action_count):
-    """Compare selected full-sequence predictions with causal prefix forwards."""
+    """Test causal invariance at fixed shape, position selection, and prefix drift."""
     checks = sorted(set((0, action_count - 1)))
     positions = torch.tensor([prompt_length - 1 + i for i in checks], device=ids.device)
+    results = []
     with torch.no_grad():
-        full = model(input_ids=ids, use_cache=False, logits_to_keep=positions).logits[0]
-        max_diff = 0.0
+        full = model(input_ids=ids, use_cache=False, logits_to_keep=positions).logits[0].float()
+        vocab_size = full.shape[-1]
         for j, i in enumerate(checks):
-            prefix = model(input_ids=ids[:, :prompt_length + i], use_cache=False, logits_to_keep=1).logits[0, -1]
-            delta = (full[j].float() - prefix.float()).abs().max().item()
-            max_diff = max(max_diff, delta)
-            if not torch.allclose(full[j].float(), prefix.float(), rtol=0.03, atol=0.15):
-                raise ValueError(f'Prefix alignment smoke failed at action {i}, max difference {delta}')
-        return {'checked_action_indices': checks, 'max_absolute_logit_difference': max_diff,
-                'rtol': 0.03, 'atol': 0.15}
+            single = model(input_ids=ids, use_cache=False, logits_to_keep=positions[j:j+1]).logits[0, 0].float()
+            selection_delta = (full[j] - single).abs().max().item()
+            if not torch.allclose(full[j], single, rtol=1e-5, atol=1e-5):
+                raise ValueError(f'Selected logit position mismatch at action {i}: {selection_delta}')
+            changed = ids.clone()
+            # Change the target action and all later tokens, retaining sequence shape.
+            changed[:, prompt_length+i:] = (changed[:, prompt_length+i:] + 1) % vocab_size
+            mutated = model(input_ids=changed, use_cache=False, logits_to_keep=positions[j:j+1]).logits[0, 0].float()
+            causal_delta = (single - mutated).abs().max().item()
+            if not torch.allclose(single, mutated, rtol=1e-5, atol=1e-5):
+                raise ValueError(f'Fixed-shape causality smoke failed at action {i}: {causal_delta}')
+            prefix = model(input_ids=ids[:, :prompt_length + i], use_cache=False, logits_to_keep=1).logits[0, -1].float()
+            logp, logq = single.log_softmax(-1), prefix.log_softmax(-1)
+            p, q = logp.exp(), logq.exp()
+            action_id = int(ids[0, prompt_length+i])
+            results.append({'action_index': i, 'logit_position': int(positions[j]),
+                'selection_max_absolute_logit_difference': selection_delta,
+                'fixed_shape_causal_max_absolute_logit_difference': causal_delta,
+                'prefix_max_absolute_logit_difference': (single-prefix).abs().max().item(),
+                'prefix_mean_absolute_logit_difference': (single-prefix).abs().mean().item(),
+                'prefix_total_variation': (0.5*(p-q).abs().sum()).item(),
+                'prefix_kl_full_to_prefix': (p*(logp-logq)).sum().item(),
+                'prefix_action_log_probability_difference': abs((logp[action_id]-logq[action_id]).item())})
+    return {'checks': results, 'fixed_shape_rtol': 1e-5, 'fixed_shape_atol': 1e-5,
+            'prefix_comparison_is_diagnostic': True}
 
 
 def run(config, data_path, adapter, baseline, teacher_run, output):
