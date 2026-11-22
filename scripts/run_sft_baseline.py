@@ -11,12 +11,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 import torch
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 
 from src.baseline_data import prepare_splits, read_rows, score_output
+from src.json_io import write_json_atomic
 
 
 def encode_sample(tokenizer, sample, max_length):
@@ -88,7 +90,7 @@ def git_state():
 
 
 def write_json(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(path, value)
 
 
 def load_model(config):
@@ -134,7 +136,7 @@ def validate_loss(model, samples, limit, device):
     return {"loss": total / tokens, "samples": min(limit, len(samples)), "target_tokens": tokens}
 
 
-def evaluate_generation(model, tokenizer, rows, config, device, output_path):
+def evaluate_generation(model, tokenizer, rows, config, device, output_path, progress=None):
     model.eval()
     model.config.use_cache = True
     records = []
@@ -156,7 +158,10 @@ def evaluate_generation(model, tokenizer, rows, config, device, output_path):
                       "token_limit_reached": len(generated_tokens) == config["max_new_tokens"] and not reached_eos,
                       "scores": score_output(text, sample)}
             records.append(record)
-            predictions.write(json.dumps(record, ensure_ascii=False) + "\n")
+            predictions.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+            predictions.flush()
+            if progress is not None:
+                progress(len(records), len(rows))
     return records
 
 
@@ -193,10 +198,15 @@ def effective_config(config):
     config.setdefault("evaluate_base_model", False)
     if not isinstance(config["evaluate_base_model"], bool):
         raise ValueError("evaluate_base_model must be a boolean")
+    config.setdefault("generation_eval_split", "test")
+    if config["generation_eval_split"] not in ("validation", "test"):
+        raise ValueError("generation_eval_split must be validation or test")
+    if config.get("model_id") == "Qwen/Qwen3-4B" and config["generation_eval_split"] == "validation" and not config["evaluate_base_model"]:
+        raise ValueError("4B teacher validation requires evaluate_base_model=true")
     return config
 
 
-def run(config, data_path, output):
+def _run(config, data_path, output):
     config = effective_config(config)
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         raise RuntimeError("This baseline requires a CUDA GPU supporting BF16")
@@ -207,9 +217,20 @@ def run(config, data_path, output):
             raise ValueError(f"{name} must be a positive integer")
     output.mkdir(parents=True, exist_ok=True)
     write_json(output / "status.json", {"status": "incomplete"})
+    state = {"status": "running", "stage": "initializing", "step": 0,
+             "total_steps": config["max_steps"], "evaluation_completed": 0,
+             "evaluation_total": config["max_eval_samples"]}
+    def progress(stage, **values):
+        state.update(values, stage=stage, updated_at=datetime.now(timezone.utc).isoformat())
+        state["memory_allocated_bytes"] = torch.cuda.memory_allocated(device)
+        state["memory_reserved_bytes"] = torch.cuda.memory_reserved(device)
+        state["peak_allocated_bytes"] = torch.cuda.max_memory_allocated(device)
+        state["peak_reserved_bytes"] = torch.cuda.max_memory_reserved(device)
+        write_json(output / "progress.json", state)
     set_seed(config["seed"])
     torch.cuda.reset_peak_memory_stats()
     device = torch.device("cuda:0")
+    progress("preparing_data")
     dataset_hash = hashlib.sha256(data_path.read_bytes()).hexdigest()
     write_json(output / "config.json", config)
     provenance = {
@@ -233,16 +254,25 @@ def run(config, data_path, output):
     tokenizer = AutoTokenizer.from_pretrained(config["model_id"], revision=config["model_revision"])
     limits = {"train": config["max_steps"] * config["gradient_accumulation_steps"],
               "validation": config["max_validation_samples"], "test": config["max_eval_samples"]}
+    if config["generation_eval_split"] == "validation":
+        limits["validation"] = max(config["max_validation_samples"], config["max_eval_samples"])
+        splits = {name: samples for name, samples in splits.items() if name != "test"}
     encoded, audit = prepare_encoded(tokenizer, splits, config["max_length"], limits, config["seed"])
     manifest["tokenization"] = audit
     write_json(output / "split_manifest.json", manifest)
+    progress("loading_model")
     model = load_model(config)
-    rows = encoded["test"][:config["max_eval_samples"]]
+    rows = encoded[config["generation_eval_split"]][:config["max_eval_samples"]]
+    if config["generation_eval_split"] == "validation" and len(rows) != config["max_eval_samples"]:
+        raise ValueError("Not enough usable validation examples for paired generation evaluation")
     base_records = None
     start = time.monotonic()
     if config["evaluate_base_model"]:
+        progress("base_evaluation", evaluation_completed=0, evaluation_total=len(rows))
         with torch.random.fork_rng(devices=[0]), model.disable_adapter():
-            base_records = evaluate_generation(model, tokenizer, rows, config, device, output / "base_predictions.jsonl")
+            base_records = evaluate_generation(model, tokenizer, rows, config, device, output / "base_predictions.jsonl",
+                lambda count, total: progress("base_evaluation", evaluation_completed=count, evaluation_total=total))
+        write_json(output / "base_predictions.json", base_records)
         model.config.use_cache = False
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=config["learning_rate"])
     rng = random.Random(config["seed"])
@@ -250,6 +280,8 @@ def run(config, data_path, output):
     rng.shuffle(order)
     position = 0
     model.train()
+    history = []
+    progress("training")
     with (output / "train_log.jsonl").open("w", encoding="utf-8") as log:
         for step in range(1, config["max_steps"] + 1):
             optimizer.zero_grad(set_to_none=True)
@@ -274,15 +306,25 @@ def run(config, data_path, output):
                    "elapsed_seconds": time.monotonic() - start}
             log.write(json.dumps(row) + "\n")
             log.flush()
+            history.append(row)
+            progress("training", step=step, loss=row["loss"], gradient_norm=row["gradient_norm"])
+    write_json(output / "train_history.json", history)
+    progress("validation_loss")
     validation = validate_loss(model, encoded["validation"], config["max_validation_samples"], device)
     adapter_dir = output / "adapter"
     model.save_pretrained(adapter_dir)
     tokenizer.save_pretrained(adapter_dir)
+    progress("adapter_saved")
     # Reload the exact saved adapter against the original base before evaluation.
     model = model.unload()
     model = PeftModel.from_pretrained(model, adapter_dir, is_trainable=False)
-    records = evaluate_generation(model, tokenizer, rows, config, device, output / "predictions.jsonl")
-    metrics = {"count": len(records), "validation": validation,
+    progress("sft_evaluation", adapter_reloaded=True)
+    progress("sft_evaluation", evaluation_completed=0, evaluation_total=len(rows))
+    records = evaluate_generation(model, tokenizer, rows, config, device, output / "predictions.jsonl",
+        lambda count, total: progress("sft_evaluation", evaluation_completed=count, evaluation_total=total))
+    write_json(output / "predictions.json", records)
+    metrics = {"count": len(records), "generation_eval_split": config["generation_eval_split"],
+               "adapter_reloaded": True, "validation": validation,
                "metrics": aggregate_scores(records),
                "peak_allocated_bytes": torch.cuda.max_memory_allocated(device),
                "peak_reserved_bytes": torch.cuda.max_memory_reserved(device),
@@ -291,8 +333,25 @@ def run(config, data_path, output):
         metrics["base_metrics"] = aggregate_scores(base_records)
         metrics["paired_joint"] = paired_joint_counts(base_records, records)
     write_json(output / "metrics.json", metrics)
+    progress("complete", status="complete")
     write_json(output / "status.json", {"status": "complete"})
     return metrics
+
+
+def run(config, data_path, output):
+    try:
+        return _run(config, data_path, output)
+    except Exception as exc:
+        progress_path = output / "progress.json"
+        if progress_path.exists():
+            try:
+                state = json.loads(progress_path.read_text(encoding="utf-8"))
+                state.update(status="failed", updated_at=datetime.now(timezone.utc).isoformat(),
+                             error={"type": type(exc).__name__, "message": str(exc)})
+                write_json(progress_path, state)
+            except (OSError, ValueError):
+                pass
+        raise
 
 
 def main():

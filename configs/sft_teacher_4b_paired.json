@@ -1,0 +1,29 @@
+{
+  "model_id": "Qwen/Qwen3-4B",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "dataset_source": "Salesforce/xlam-function-calling-60k:xlam_function_calling_60k.json",
+  "dataset_revision": "26d14ebfe18b1f7b524bd39b404b50af5dc97866",
+  "seed": 42,
+  "validation_fraction": 0.1,
+  "test_fraction": 0.1,
+  "max_length": 1024,
+  "max_steps": 64,
+  "gradient_accumulation_steps": 4,
+  "learning_rate": 0.0001,
+  "lora_rank": 8,
+  "lora_alpha": 16,
+  "lora_dropout": 0.05,
+  "lora_targets": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj"
+  ],
+  "quantization": "nf4",
+  "gradient_checkpointing": true,
+  "max_validation_samples": 16,
+  "max_eval_samples": 32,
+  "max_new_tokens": 256,
+  "evaluate_base_model": true,
+  "generation_eval_split": "validation"
+}

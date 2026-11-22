@@ -62,3 +62,9 @@ $env:HF_HOME = 'D:\opdistill\hf-cache'
 - [协作与研究规范](AGENTS.md)
 
 `Papers/notes/` 保存文献核验记录。论文原始资料和模板沿用本地保存规则；部分正式报告与答辩输出文件已纳入版本控制，具体以 Git 跟踪状态为准。
+
+## 4B 教师 SFT 试验
+
+`configs/sft_teacher_4b_paired.json` 固定 Qwen3-4B 版本，以 NF4 和 LoRA 训练 64 个更新步；在同一批最多 32 条验证样本上记录原始模型与重载保存的 adapter 后模型的生成结果，验证损失最多使用其中 16 条。测试集不用于此阶段的生成评估。运行方式与前述 SFT 命令相同，替换配置并指定新的空输出目录。该结果用于教师非退化检查，不代表泛化提升。
+
+运行中 `progress.json` 是实时更新的标准 JSON，包含阶段、步数、损失、梯度和显存；完成时还生成 `train_history.json`、`base_predictions.json` 和 `predictions.json` 数组，保留原有 JSONL。失败时进度文件记录错误。

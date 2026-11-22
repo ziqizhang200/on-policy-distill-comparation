@@ -29,3 +29,9 @@ xLAM 的参数类型支持简单类型、`optional` 修饰及安全解析的嵌�
 成功运行的输出目录包含 `status.json`、`config.json`、`provenance.json`、`split_manifest.json`、`train_log.jsonl`、`adapter/`、`predictions.jsonl` 和 `metrics.json`。`status.json` 在开始时记录 `incomplete`，所有步骤成功后更新为 `complete`。其中 provenance 记录 Git commit 与 dirty 状态、输入输出路径、工作目录、命令参数、数据 SHA-256、Python、平台、GPU、CUDA 及依赖版本，配置文件记录预算和模型版本。日志记录更新步、损失、梯度范数与耗时；预测逐行保存原始输出、目标、各项布尔分数、生成 token 数、是否到达 EOS 及是否达到 token 上限；metrics 汇总验证损失、评测分子/分母/比例、峰值显存与耗时。dirty 状态不包含代码差异，正式结果应从已提交且可追溯的代码运行。
 
 可选配置 `evaluate_base_model` 为布尔值，缺省为 `false`。设为 `true` 时，训练前禁用 LoRA adapter，对同一组测试样本按相同生成参数评测原始量化模型，记录 `base_predictions.jsonl`；训练后重新加载保存的 adapter 并生成 `predictions.jsonl`。`metrics.json` 的 `base_metrics` 汇总原始模型指标，`paired_joint` 给出联合精确匹配的 `improved`、`regressed`、`unchanged_correct`、`unchanged_incorrect`、`unchanged` 和 `denominator`；逐条比较前检查 ID 和目标调用一致。`validation` 仍为 SFT 后 teacher-forced 损失，配对模式下耗时和显存峰值包含训练前的原始模型评测。配置 `configs/sft_baseline_06b_paired.json` 设定 0.6B、64 更新步、累积 4、最多 16 条验证和 64 条测试样本。
+
+### 4B 教师 SFT 与标准 JSON
+
+`configs/sft_teacher_4b_paired.json` 固定原始 Qwen3-4B 及 xLAM 版本，使用 NF4、64 个更新步、每步累积 4 个样本。`generation_eval_split` 默认为 `test` 以保持旧配置兼容；设为 `validation` 时，从同一验证划分选择固定顺序的 `max_eval_samples` 条进行训练前后配对生成，损失评估仍最多使用 `max_validation_samples` 条，测试集不被编码用于生成评估。4B 验证配置必须开启 `evaluate_base_model`。
+
+`progress.json` 通过同目录临时文件原子替换，严格禁止 NaN/Inf；记录 UTC 时间、阶段、完成状态、训练步、最近损失与梯度、当前和峰值显存，以及失败信息。`train_history.json`、`base_predictions.json`、`predictions.json` 是完成阶段写出的标准 JSON 数组，原 JSONL 同时保留。`metrics.json` 记录生成划分和 `adapter_reloaded`，后者表示从保存目录重载后才生成评估结果。

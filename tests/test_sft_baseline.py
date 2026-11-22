@@ -1,9 +1,12 @@
 import unittest
+import json
 from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import torch
+
+from src.json_io import write_json_atomic
 
 from scripts.run_sft_baseline import (aggregate_scores, effective_config, encode_sample, evaluate_generation,
                                       paired_joint_counts, prepare_encoded, tensor_batch, validate_loss)
@@ -49,6 +52,24 @@ class BaselineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "boolean"):
             effective_config({"evaluate_base_model": "false"})
 
+    def test_generation_split_and_teacher_contract(self):
+        self.assertEqual(effective_config({})["generation_eval_split"], "test")
+        self.assertEqual(effective_config({"generation_eval_split": "validation"})["generation_eval_split"], "validation")
+        with self.assertRaises(ValueError):
+            effective_config({"generation_eval_split": "train"})
+        with self.assertRaises(ValueError):
+            effective_config({"model_id": "Qwen/Qwen3-4B", "generation_eval_split": "validation"})
+        self.assertTrue(effective_config({"model_id": "Qwen/Qwen3-4B", "generation_eval_split": "validation", "evaluate_base_model": True})["evaluate_base_model"])
+
+    def test_strict_atomic_json_preserves_previous_document(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "progress.json"
+            write_json_atomic(path, {"status": "running", "step": 1})
+            with self.assertRaises(ValueError):
+                write_json_atomic(path, {"loss": float("nan")})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"status": "running", "step": 1})
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ["progress.json"])
+
     def test_generation_records_stopping_and_scores(self):
         class GenerationTokenizer:
             eos_token_id = 99
@@ -76,8 +97,10 @@ class BaselineTests(unittest.TestCase):
         tokenizer = GenerationTokenizer()
         with TemporaryDirectory() as directory:
             output = Path(directory) / "predictions.jsonl"
+            updates = []
             records = evaluate_generation(model, tokenizer, [(sample, {})], {"max_new_tokens": 4},
-                                          torch.device("cpu"), output)
+                                          torch.device("cpu"), output, lambda count, total: updates.append((count, total)))
+            self.assertEqual(updates, [(1, 1)])
             self.assertTrue(output.exists())
         self.assertTrue(records[0]["scores"]["joint_match"])
         self.assertTrue(records[0]["reached_eos"])
