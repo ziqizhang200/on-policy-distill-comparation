@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -18,7 +19,16 @@ def write_json_atomic(path, value):
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(name, path)
+        # Windows readers can briefly prevent replacing an otherwise valid file.
+        # Keep atomicity, and fail after a bounded wait on persistent errors.
+        for attempt in range(10):
+            try:
+                os.replace(name, path)
+                break
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 9:
+                    raise
+                time.sleep(0.1)
     finally:
         if name is not None and os.path.exists(name):
             os.unlink(name)

@@ -70,6 +70,41 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"status": "running", "step": 1})
             self.assertEqual([p.name for p in Path(directory).iterdir()], ["progress.json"])
 
+    def test_atomic_json_retries_transient_windows_sharing_errors(self):
+        import os
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "progress.json"
+            original_replace = os.replace
+            error = PermissionError("sharing violation")
+            error.winerror = 5
+            attempts = []
+            def flaky_replace(source, destination):
+                attempts.append(1)
+                if len(attempts) <= 2:
+                    raise error
+                return original_replace(source, destination)
+            with patch("src.json_io.os.replace", side_effect=flaky_replace) as replace, \
+                    patch("src.json_io.time.sleep") as sleep:
+                write_json_atomic(path, {"step": 1})
+            self.assertEqual(replace.call_count, 3)
+            self.assertEqual(sleep.call_count, 2)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"step": 1})
+
+    def test_atomic_json_persistent_windows_error_preserves_prior(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "progress.json"
+            write_json_atomic(path, {"step": 1})
+            error = PermissionError("sharing violation")
+            error.winerror = 5
+            with patch("src.json_io.os.replace", side_effect=error) as replace, \
+                    patch("src.json_io.time.sleep") as sleep:
+                with self.assertRaises(PermissionError):
+                    write_json_atomic(path, {"step": 2})
+            self.assertEqual(replace.call_count, 10)
+            self.assertEqual(sleep.call_count, 9)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"step": 1})
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ["progress.json"])
+
     def test_generation_records_stopping_and_scores(self):
         class GenerationTokenizer:
             eos_token_id = 99
