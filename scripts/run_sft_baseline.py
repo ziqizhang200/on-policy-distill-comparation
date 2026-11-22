@@ -134,7 +134,70 @@ def validate_loss(model, samples, limit, device):
     return {"loss": total / tokens, "samples": min(limit, len(samples)), "target_tokens": tokens}
 
 
+def evaluate_generation(model, tokenizer, rows, config, device, output_path):
+    model.eval()
+    model.config.use_cache = True
+    records = []
+    with output_path.open("w", encoding="utf-8") as predictions:
+        for sample, _ in rows:
+            prompt = tokenizer.apply_chat_template(
+                [{"role": "user", "content": sample["query"]}], tools=sample["tools"],
+                tokenize=True, add_generation_prompt=True, enable_thinking=False, return_tensors="pt",
+            ).to(device)
+            with torch.no_grad():
+                generated = model.generate(input_ids=prompt, attention_mask=torch.ones_like(prompt),
+                                           do_sample=False, max_new_tokens=config["max_new_tokens"],
+                                           pad_token_id=tokenizer.eos_token_id)
+            generated_tokens = generated[0, prompt.shape[1]:]
+            reached_eos = bool(len(generated_tokens) and generated_tokens[-1].item() == tokenizer.eos_token_id)
+            text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+            record = {"id": sample["id"], "prediction": text, "target": sample["calls"],
+                      "generated_tokens": len(generated_tokens), "reached_eos": reached_eos,
+                      "token_limit_reached": len(generated_tokens) == config["max_new_tokens"] and not reached_eos,
+                      "scores": score_output(text, sample)}
+            records.append(record)
+            predictions.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return records
+
+
+def aggregate_scores(records):
+    scores = [record["scores"] for record in records]
+    return {key: {"correct": sum(int(score[key]) for score in scores), "denominator": len(scores),
+                  "rate": sum(int(score[key]) for score in scores) / len(scores)} for key in scores[0]}
+
+
+def paired_joint_counts(base_records, sft_records):
+    if len(base_records) != len(sft_records):
+        raise ValueError("Base and SFT predictions must have the same length")
+    counts = {"improved": 0, "regressed": 0, "unchanged_correct": 0, "unchanged_incorrect": 0}
+    for base, sft in zip(base_records, sft_records):
+        if base["id"] != sft["id"] or base["target"] != sft["target"]:
+            raise ValueError("Base and SFT predictions are not aligned")
+        before = base["scores"]["joint_match"]
+        after = sft["scores"]["joint_match"]
+        if before and after:
+            counts["unchanged_correct"] += 1
+        elif before:
+            counts["regressed"] += 1
+        elif after:
+            counts["improved"] += 1
+        else:
+            counts["unchanged_incorrect"] += 1
+    counts["unchanged"] = counts["unchanged_correct"] + counts["unchanged_incorrect"]
+    counts["denominator"] = len(base_records)
+    return counts
+
+
+def effective_config(config):
+    config = dict(config)
+    config.setdefault("evaluate_base_model", False)
+    if not isinstance(config["evaluate_base_model"], bool):
+        raise ValueError("evaluate_base_model must be a boolean")
+    return config
+
+
 def run(config, data_path, output):
+    config = effective_config(config)
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         raise RuntimeError("This baseline requires a CUDA GPU supporting BF16")
     if output.exists() and any(output.iterdir()):
@@ -174,12 +237,18 @@ def run(config, data_path, output):
     manifest["tokenization"] = audit
     write_json(output / "split_manifest.json", manifest)
     model = load_model(config)
+    rows = encoded["test"][:config["max_eval_samples"]]
+    base_records = None
+    start = time.monotonic()
+    if config["evaluate_base_model"]:
+        with torch.random.fork_rng(devices=[0]), model.disable_adapter():
+            base_records = evaluate_generation(model, tokenizer, rows, config, device, output / "base_predictions.jsonl")
+        model.config.use_cache = False
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=config["learning_rate"])
     rng = random.Random(config["seed"])
     order = list(range(len(encoded["train"])))
     rng.shuffle(order)
     position = 0
-    start = time.monotonic()
     model.train()
     with (output / "train_log.jsonl").open("w", encoding="utf-8") as log:
         for step in range(1, config["max_steps"] + 1):
@@ -212,35 +281,15 @@ def run(config, data_path, output):
     # Reload the exact saved adapter against the original base before evaluation.
     model = model.unload()
     model = PeftModel.from_pretrained(model, adapter_dir, is_trainable=False)
-    model.eval()
-    model.config.use_cache = True
-    rows = encoded["test"][:config["max_eval_samples"]]
-    scores = []
-    with (output / "predictions.jsonl").open("w", encoding="utf-8") as predictions:
-        for sample, _ in rows:
-            prompt = tokenizer.apply_chat_template(
-                [{"role": "user", "content": sample["query"]}], tools=sample["tools"],
-                tokenize=True, add_generation_prompt=True, enable_thinking=False, return_tensors="pt",
-            ).to(device)
-            with torch.no_grad():
-                generated = model.generate(input_ids=prompt, attention_mask=torch.ones_like(prompt),
-                                           do_sample=False, max_new_tokens=config["max_new_tokens"],
-                                           pad_token_id=tokenizer.eos_token_id)
-            generated_tokens = generated[0, prompt.shape[1]:]
-            reached_eos = bool(len(generated_tokens) and generated_tokens[-1].item() == tokenizer.eos_token_id)
-            text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
-            score = score_output(text, sample)
-            scores.append(score)
-            predictions.write(json.dumps({"id": sample["id"], "prediction": text, "target": sample["calls"],
-                                          "generated_tokens": len(generated_tokens), "reached_eos": reached_eos,
-                                          "token_limit_reached": len(generated_tokens) == config["max_new_tokens"] and not reached_eos,
-                                          "scores": score}, ensure_ascii=False) + "\n")
-    metrics = {"count": len(scores), "validation": validation,
-               "metrics": {key: {"correct": sum(int(s[key]) for s in scores), "denominator": len(scores),
-                                  "rate": sum(int(s[key]) for s in scores) / len(scores)} for key in scores[0]},
+    records = evaluate_generation(model, tokenizer, rows, config, device, output / "predictions.jsonl")
+    metrics = {"count": len(records), "validation": validation,
+               "metrics": aggregate_scores(records),
                "peak_allocated_bytes": torch.cuda.max_memory_allocated(device),
                "peak_reserved_bytes": torch.cuda.max_memory_reserved(device),
                "elapsed_seconds": time.monotonic() - start}
+    if base_records is not None:
+        metrics["base_metrics"] = aggregate_scores(base_records)
+        metrics["paired_joint"] = paired_joint_counts(base_records, records)
     write_json(output / "metrics.json", metrics)
     write_json(output / "status.json", {"status": "complete"})
     return metrics
