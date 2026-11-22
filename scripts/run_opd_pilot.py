@@ -210,6 +210,32 @@ def smoke_prefix(model, ids, prompt_length, action_count):
             'prefix_comparison_is_diagnostic': True}
 
 
+def matching_selection(labels, action_count, trial_seed, step):
+    """Choose target indices with independent RNGs; label indices are unshifted."""
+    valid = [i for i, label in enumerate(labels) if i > 0 and label != -100]
+    quota = min(action_count, len(valid))
+    if quota < 1:
+        raise ValueError('Matching requires at least one target in each branch')
+    def choose(population, branch):
+        key = f'matched-supervised-tokens-v1:{trial_seed}:{step}:{branch}'
+        seed = int.from_bytes(hashlib.sha256(key.encode('utf-8')).digest(), 'big')
+        return sorted(random.Random(seed).sample(population, quota))
+    return {'quota': quota, 'opd_raw_tokens': action_count, 'sft_raw_tokens': len(valid),
+            'opd_action_indices': choose(list(range(action_count)), 'opd'),
+            'sft_label_indices': choose(valid, 'sft'),
+            'selection_policy': 'sha256(matched-supervised-tokens-v1:trial_seed:step:branch); Python random.sample',
+            'trial_seed': trial_seed}
+
+
+def mask_sft_labels(encoded, selected):
+    """Keep the full input and only the selected unshifted target labels."""
+    selected = set(selected)
+    labels = encoded['labels']
+    if not selected or any(i <= 0 or i >= len(labels) or labels[i] == -100 for i in selected):
+        raise ValueError('Invalid selected SFT target positions')
+    return {**encoded, 'labels': [value if i in selected else -100 for i, value in enumerate(labels)]}
+
+
 def run(config, data_path, adapter, baseline, teacher_run, output):
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
         raise RuntimeError('CUDA with BF16 support is required')
@@ -221,6 +247,8 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
     for key in ('seed', 'trial_seed', 'eval_seed'):
         if key in config and (not isinstance(config[key], int) or isinstance(config[key], bool) or config[key] < 0):
             raise ValueError(f'{key} must be a non-negative integer')
+    if not isinstance(config.get('match_supervised_tokens', False), bool):
+        raise ValueError('match_supervised_tokens must be boolean')
     if config.get('eval_split', 'validation') not in ('validation', 'test'):
         raise ValueError('eval_split must be validation or test')
     if config['quantization'] != 'nf4' or config['learning_rate'] <= 0:
@@ -307,6 +335,10 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
         'peak_reserved_bytes': torch.cuda.max_memory_reserved()})
     del model
     release()
+    matching = config.get('match_supervised_tokens', False)
+    matching_rows = []
+    if matching:
+        write_json(output / 'matching.json', matching_rows)
     for branch in ('opd', 'continued_sft'):
         progress.update(stage='training', branch=branch, step=0)
         write_json(output / 'progress.json', progress)
@@ -354,7 +386,15 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
                         positions = torch.arange(len(prompt)-1, len(prompt)+count-1, device=device)
                         teacher_logits = teacher(input_ids=sequence, use_cache=False, logits_to_keep=positions).logits[0]
                     student_logits = model(input_ids=sequence, use_cache=False, logits_to_keep=positions).logits[0]
-                    loss = student_teacher_kl(student_logits, teacher_logits)
+                    if matching:
+                        selection = matching_selection(encoded['labels'], count, config.get('trial_seed', config['seed']), step)
+                        selection.update(step=step, id=sample['id'])
+                        matching_rows.append(selection)
+                        write_json(output / 'matching.json', matching_rows)
+                        selected = selection['opd_action_indices']
+                        loss = student_teacher_kl(student_logits[selected], teacher_logits[selected])
+                    else:
+                        loss = student_teacher_kl(student_logits, teacher_logits)
                     student_action_lp = torch.log_softmax(student_logits.detach().float(), -1).gather(1, actions[:, None]).squeeze(1)
                     teacher_action_lp = torch.log_softmax(teacher_logits.float(), -1).gather(1, actions[:, None]).squeeze(1)
                     text = student_tok.decode(actions, skip_special_tokens=True)
@@ -366,12 +406,28 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
                            'rollout_text': text, 'parser_scores': score_output(text, sample),
                            'reached_eos': reached_eos, 'token_limit_reached': count == config['rollout_max_new_tokens'] and not reached_eos,
                            'rollout_max_new_tokens': config['rollout_max_new_tokens'], 'smoke': smoke}
-                    target_tokens += count
+                    if matching:
+                        row['matching'] = selection
+                    target_tokens += selection['quota'] if matching else count
                 else:
-                    loss = model(**tensor_batch(encoded, device)).loss
-                    count = sum(x != -100 for x in encoded['labels'])
+                    if matching:
+                        selection = matching_rows[step - 1]
+                        if selection['step'] != step or selection['id'] != sample['id']:
+                            raise ValueError('Matching replay sample order differs')
+                        if selection != {**matching_selection(encoded['labels'], selection['opd_raw_tokens'], config.get('trial_seed', config['seed']), step), 'step': step, 'id': sample['id']}:
+                            raise ValueError('Matching replay selection differs')
+                        masked = mask_sft_labels(encoded, selection['sft_label_indices'])
+                        count = sum(x != -100 for x in masked['labels'][1:])
+                        if count != selection['quota'] or len(selection['opd_action_indices']) != count:
+                            raise ValueError('Matched supervision quota differs')
+                        loss = model(**tensor_batch(masked, device)).loss
+                    else:
+                        loss = model(**tensor_batch(encoded, device)).loss
+                        count = sum(x != -100 for x in encoded['labels'])
                     target_tokens += count
                     row = {'step': step, 'id': sample['id'], 'supervised_tokens': count}
+                    if matching:
+                        row['matching'] = selection
                 if not torch.isfinite(loss):
                     raise ValueError('Non-finite loss')
                 loss.backward()
@@ -399,6 +455,9 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
             if branch == 'continued_sft':
                 del loss
             model.save_pretrained(branch_dir / 'adapter')
+        if matching and (len(matching_rows) != config['max_steps'] or
+                         target_tokens != sum(row['quota'] for row in matching_rows)):
+            raise ValueError('Matched supervision aggregate differs')
         train_metrics = {'steps': config['max_steps'], 'target_tokens': target_tokens,
             'elapsed_seconds': time.monotonic()-start, 'peak_allocated_bytes': torch.cuda.max_memory_allocated(),
             'peak_reserved_bytes': torch.cuda.max_memory_reserved(), 'model_mode': 'eval with gradients',

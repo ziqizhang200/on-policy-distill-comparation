@@ -133,3 +133,42 @@ def test_heldout_selection_is_fixed_across_trial_seeds_and_excludes_prior_ids(mo
             runner.selected_samples(cfg, None, splits, bad_manifest, teacher)
     with pytest.raises(ValueError, match='Insufficient independent test'):
         runner.selected_samples({**cfg, 'eval_samples': 100}, None, splits, manifest, teacher)
+
+
+def test_matching_selection_shift_eos_rng_and_replay():
+    import random
+    from scripts.run_opd_pilot import matching_selection
+    labels = [99, -100, 10, 11, 12]  # index 0 is never a shifted target; 12 is EOS
+    random.seed(12)
+    state = random.getstate()
+    first = matching_selection(labels, 5, 42, 1)
+    assert random.getstate() == state
+    assert first == matching_selection(labels, 5, 42, 1)
+    assert first['quota'] == 3 and first['sft_label_indices'] == [2, 3, 4]
+    assert len(set(first['opd_action_indices'])) == 3
+    eos = matching_selection(labels, 1, 42, 1)
+    assert eos['opd_action_indices'] == [0] and eos['quota'] == 1
+    with pytest.raises(ValueError, match='at least one'):
+        matching_selection([-100, -100], 2, 42, 1)
+
+
+def test_matching_masks_only_selected_losses():
+    import torch.nn.functional as F
+    from scripts.run_opd_pilot import mask_sft_labels
+    encoded = {'input_ids': [1, 2, 3, 4], 'labels': [-100, 0, 1, 2]}
+    masked = mask_sft_labels(encoded, [1, 3])
+    assert masked['input_ids'] == encoded['input_ids']
+    assert encoded['labels'] == [-100, 0, 1, 2]
+    assert masked['labels'] == [-100, 0, -100, 2]
+    logits = torch.randn(3, 3, requires_grad=True)
+    loss = F.cross_entropy(logits, torch.tensor(masked['labels'][1:]), ignore_index=-100)
+    loss.backward()
+    assert logits.grad[1].abs().sum() == 0
+    assert logits.grad[[0, 2]].abs().sum() > 0
+    student = torch.randn(4, 3, requires_grad=True)
+    teacher = torch.randn(4, 3)
+    student_teacher_kl(student[[0, 3]], teacher[[0, 3]]).backward()
+    assert student.grad[[1, 2]].abs().sum() == 0
+    assert student.grad[[0, 3]].abs().sum() > 0
+    with pytest.raises(ValueError):
+        mask_sft_labels(encoded, [0])
