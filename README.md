@@ -85,3 +85,5 @@ $env:HF_HOME = 'D:\opdistill\hf-cache'
 可选配置 `configs/opd_matched_tokens_validation_06b_4b.json` 在 32 次更新中按配对样本对齐 OPD 与续训 SFT 的监督 token 数，使用 128 token rollout 上限及偏移 80 后的 64 条验证样本；该配置尚待实际运行。完整上下文不变，随机位置子采样在各轨迹内无偏，但不等同于匹配轨迹长度或计算成本。
 
 `configs/opd_matched_tokens_heldout_06b_4b.json` 是后续待确认的同数据集留出对照配置，尚未选取新测试样本或运行。32 步验证完成并锁定方案后，调用上述 OPD 入口时须追加 `--exclude-test-run D:\opdistill\experiments\opd_heldout_36da947_seed42`，并分别以 `--trial-seed 42`、`43`、`44` 和各自空输出目录运行；参数可重复传入，以排除其他已完成测试运行。该配置锁定此前 96 条测试样本的来源文件哈希，还排除学生基线用过的 64 条；三次使用同一评测顺序。它是 xLAM 内未用样本，不是外部基准，模型预训练数据是否包含相关内容未知。仅完成验证及方案确认后才应使用测试集，结果和配置的边界见 [公共接口](Interface.md)。
+
+后续若需在已完成的等 token 测试运行相同样本上比较冻结教师，可使用 `python -m scripts.evaluate_opd_teacher --run <已完成运行目录> --data <原数据文件> --teacher-run <原教师运行目录> --output <新空目录> --seed 42`。该入口严格使用原运行已锁定的样本与评测生成设置，保存教师预测和逐条配对指标；其输出仍是结构化精确匹配，不执行工具。入口尚未进行真实模型验收，不会自行选取测试样本。

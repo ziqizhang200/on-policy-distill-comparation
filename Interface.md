@@ -60,3 +60,7 @@ CLI 可选 `--trial-seed <非负整数>`，覆盖配置中的 `trial_seed`；未
 ### OPD 可选等监督 token 模式
 
 `match_supervised_tokens` 为布尔值，默认 `false`。启用时，每个样本以生成 token 数（含 EOS）与 SFT 移位后有效标签数的较小值作为配额，使用由 trial seed、更新步与分支经 SHA-256 派生的独立 Python 随机数流无放回均匀抽取位置；输入上下文保持完整。OPD 先运行并记录 `matching.json`，SFT 以相同顺序和初始 adapter 校验并重放配额。该文件及各分支实时 `trajectories.json` 保存原始数量、配额和选中位置：OPD 为从零起算的生成动作索引，SFT 为未移位的标签索引。`training_metrics.json` 的 `target_tokens` 是实际计入损失的位置数；代码校验逐步及总数一致。此控制不匹配计算量或上下文长度。
+
+### 冻结教师的固定样本比较
+
+`python -m scripts.evaluate_opd_teacher --run <已完成等 token 测试运行> --data <原数据文件> --teacher-run <原教师运行> --output <空目录> --seed <非负整数>` 只重建来源运行 `selection.json` 已锁定的测试 ID，不另选样本。它检查来源完成状态、数据哈希、模型与教师 adapter 哈希、各分支 ID 和目标对齐及评分可复现；重新划分后再核对 ID 和目标。师生 tokenizer 及固定版本生成默认设置须一致；使用与学生相同的 `evaluate_generation`，显式 `do_sample=False` 和原运行 `max_new_tokens`。输出严格 JSON 的状态、进度、来源及哈希、教师逐条预测、分项指标、相对三个学生分支的配对计数、耗时和 CUDA 峰值；失败保留已有记录。此入口尚未真实模型验收，精确匹配不代表工具执行或语义正确性。
