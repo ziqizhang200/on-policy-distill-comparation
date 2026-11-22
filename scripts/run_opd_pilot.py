@@ -76,7 +76,7 @@ def release(*models):
 
 
 def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
-    rng = random.Random(config['seed'])
+    rng = random.Random(config.get('trial_seed', config['seed']))
     candidates = list(splits['train'])
     rng.shuffle(candidates)
     train, rejected = [], []
@@ -95,10 +95,21 @@ def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
             break
     if len(train) != config['max_steps']:
         raise ValueError('Insufficient training examples within common length filters')
-    baseline_excluded = set(manifest['tokenization']['validation']['kept_ids'])
-    teacher_excluded = set(teacher_manifest['tokenization']['validation']['kept_ids'])
-    candidates = list(splits['validation'])
-    random.Random(config['seed'] + 3).shuffle(candidates)
+    eval_split = config.get('eval_split', 'validation')
+    if eval_split not in ('validation', 'test'):
+        raise ValueError('eval_split must be validation or test')
+    baseline_ids = manifest['tokenization'][eval_split]['kept_ids']
+    if eval_split == 'test':
+        expected = config.get('expected_prior_test_count')
+        if (not baseline_ids or len(set(baseline_ids)) != len(baseline_ids) or
+                not set(baseline_ids).issubset({sample['id'] for sample in splits['test']}) or
+                (expected is not None and len(baseline_ids) != expected)):
+            raise ValueError('Prior test exclusion manifest is missing, duplicated or incomplete')
+    baseline_excluded = set(baseline_ids)
+    teacher_excluded = (set(teacher_manifest['tokenization']['validation']['kept_ids'])
+                        if eval_split == 'validation' else set())
+    candidates = list(splits[eval_split])
+    random.Random(config.get('eval_seed', config['seed'] + 3)).shuffle(candidates)
     test, eval_rejected, eval_skipped = [], [], []
     offset = config.get('eval_offset', 0)
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
@@ -116,7 +127,7 @@ def selected_samples(config, tokenizer, splits, manifest, teacher_manifest):
         if len(test) == config['eval_samples']:
             break
     if len(test) != config['eval_samples']:
-        raise ValueError('Insufficient independent validation samples')
+        raise ValueError(f'Insufficient independent {eval_split} samples')
     return train, test, rejected, eval_rejected, eval_skipped
 
 
@@ -207,6 +218,11 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
     for key in ('max_steps', 'eval_samples', 'max_length', 'max_prompt_tokens', 'rollout_max_new_tokens', 'max_new_tokens'):
         if not isinstance(config[key], int) or isinstance(config[key], bool) or config[key] <= 0:
             raise ValueError(f'{key} must be a positive integer')
+    for key in ('seed', 'trial_seed', 'eval_seed'):
+        if key in config and (not isinstance(config[key], int) or isinstance(config[key], bool) or config[key] < 0):
+            raise ValueError(f'{key} must be a non-negative integer')
+    if config.get('eval_split', 'validation') not in ('validation', 'test'):
+        raise ValueError('eval_split must be validation or test')
     if config['quantization'] != 'nf4' or config['learning_rate'] <= 0:
         raise ValueError('Pilot requires NF4 and a positive learning rate')
     output.mkdir(parents=True, exist_ok=True)
@@ -238,7 +254,7 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
         'cuda_runtime': torch.version.cuda, 'gpu': torch.cuda.get_device_name(0),
         'gpu_total_memory_bytes': torch.cuda.get_device_properties(0).total_memory,
         'packages': {n: importlib.metadata.version(n) for n in ('torch', 'transformers', 'peft', 'accelerate', 'bitsandbytes')}})
-    set_seed(config['seed'])
+    set_seed(config.get('trial_seed', config['seed']))
     rows = read_rows(data_path)
     if sha256(data_path) != data_hash:
         raise RuntimeError('Dataset changed during read')
@@ -259,7 +275,8 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
         if prompt_ids(student_tok, sample) != prompt_ids(teacher_tok, sample):
             raise ValueError('Rendered student/teacher prompt IDs differ')
     write_json(output / 'selection.json', {'train_ids': [x[0]['id'] for x in train],
-        'eval_split': 'validation', 'eval_ids': [x[0]['id'] for x in test],
+        'eval_split': config.get('eval_split', 'validation'), 'eval_ids': [x[0]['id'] for x in test],
+        'student_prior_eval_excluded_ids': manifest['tokenization'][config.get('eval_split', 'validation')]['kept_ids'],
         'student_prior_validation_excluded_ids': manifest['tokenization']['validation']['kept_ids'],
         'teacher_validation_excluded_ids': teacher_manifest['tokenization']['validation']['kept_ids'],
         'student_prior_train_excluded_ids': manifest['tokenization']['train']['kept_ids'],
@@ -267,7 +284,9 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
         'rejected_train_ids': rejected, 'rejected_eval_ids': eval_rejected,
         'eval_offset': config.get('eval_offset', 0), 'eval_offset_skipped_ids': eval_skipped,
         'common_full_sample_max_length': config['max_length'],
-        'common_prompt_max_tokens': config['max_prompt_tokens'], 'seed': config['seed']})
+        'common_prompt_max_tokens': config['max_prompt_tokens'], 'seed': config['seed'],
+        'trial_seed': config.get('trial_seed', config['seed']),
+        'eval_seed': config.get('eval_seed', config['seed'] + 3)})
     device = torch.device('cuda:0')
     progress.update(stage='starting_student_evaluation', branch='starting_sft', step=0)
     write_json(output / 'progress.json', progress)
@@ -304,6 +323,9 @@ def run(config, data_path, adapter, baseline, teacher_run, output):
             del teacher_base
             teacher.eval()
             teacher.requires_grad_(False)
+        # Explicit trials reset after model loading; legacy pilots retain their RNG sequence.
+        if 'trial_seed' in config:
+            set_seed(config['trial_seed'])
         optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=config['learning_rate'])
         target_tokens = 0
         trajectories = []
@@ -417,9 +439,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ('config', 'data', 'adapter', 'baseline', 'teacher-run', 'output'):
         parser.add_argument('--' + flag, type=Path, required=True)
+    parser.add_argument('--trial-seed', type=int, help='Override trial seed without changing the data split or evaluation seed')
     args = parser.parse_args()
     try:
-        run(json.loads(args.config.read_text(encoding='utf-8-sig')), args.data, args.adapter, args.baseline, args.teacher_run, args.output)
+        config = json.loads(args.config.read_text(encoding='utf-8-sig'))
+        if args.trial_seed is not None:
+            config['trial_seed'] = args.trial_seed
+        run(config, args.data, args.adapter, args.baseline, args.teacher_run, args.output)
     except Exception as exc:
         if (args.output / 'progress.json').exists():
             progress = json.loads((args.output / 'progress.json').read_text(encoding='utf-8-sig'))

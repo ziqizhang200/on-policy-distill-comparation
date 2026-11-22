@@ -107,3 +107,29 @@ def test_validation_offset_skips_eligible_ids_without_changing_train(monkeypatch
     for bad in (-1, True, 1.5):
         with pytest.raises(ValueError, match='eval_offset'):
             runner.selected_samples({**cfg, 'eval_offset': bad}, None, splits, manifest, teacher)
+
+
+def test_heldout_selection_is_fixed_across_trial_seeds_and_excludes_prior_ids(monkeypatch):
+    from scripts import run_opd_pilot as runner
+    monkeypatch.setattr(runner, 'encode_sample', lambda tokenizer, sample, length: None if sample['id'] == 106 else {'labels': [1]})
+    monkeypatch.setattr(runner, 'prompt_ids', lambda tokenizer, sample: [1])
+    cfg = {'seed': 42, 'eval_seed': 45, 'eval_split': 'test', 'expected_prior_test_count': 2,
+           'max_steps': 4, 'max_length': 10, 'max_prompt_tokens': 10, 'eval_samples': 6}
+    splits = {'train': [{'id': i} for i in range(30)], 'test': [{'id': i} for i in range(100, 120)]}
+    manifest = {'tokenization': {'train': {'kept_ids': [0]}, 'test': {'kept_ids': [100, 101]}}}
+    teacher = {'tokenization': {'train': {'kept_ids': [1]}}}
+    selections = [runner.selected_samples({**cfg, 'trial_seed': seed}, None, splits, manifest, teacher)
+                  for seed in (42, 43, 44)]
+    eval_ids = [[row[0]['id'] for row in selection[1]] for selection in selections]
+    train_ids = [[row[0]['id'] for row in selection[0]] for selection in selections]
+    assert eval_ids[0] == eval_ids[1] == eval_ids[2]
+    assert len(set(map(tuple, train_ids))) == 3
+    assert not set(eval_ids[0]) & {100, 101, 106}
+    assert all(not set(ids) & {0, 1} for ids in train_ids)
+    assert selections[0] == runner.selected_samples({**cfg, 'trial_seed': 42}, None, splits, manifest, teacher)
+    for bad in ([100], [100, 100], [100, 999]):
+        bad_manifest = {'tokenization': {'train': {'kept_ids': [0]}, 'test': {'kept_ids': bad}}}
+        with pytest.raises(ValueError, match='manifest'):
+            runner.selected_samples(cfg, None, splits, bad_manifest, teacher)
+    with pytest.raises(ValueError, match='Insufficient independent test'):
+        runner.selected_samples({**cfg, 'eval_samples': 100}, None, splits, manifest, teacher)

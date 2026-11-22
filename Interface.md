@@ -47,3 +47,9 @@ xLAM 的参数类型支持简单类型、`optional` 修饰及安全解析的嵌�
 输出包括原子更新的严格 JSON `progress.json`、`status.json`、`selection.json`、`provenance.json`、`teacher_gate.json`、`starting_predictions.json` 及 `starting_metrics.json`，以及分支目录下的 `trajectories.json`、`training_metrics.json`、`adapter/`、`predictions.json` 和 `metrics.json`。进度在每步训练和每条评估后更新；失败时保留已有文件并写失败状态，重试须使用新目录。训练及评估分别记录耗时与 CUDA 峰值，评测结果含分子和分母以及相对起始学生的配对计数。该试跑尚待实际执行与验收。
 
 `eval_offset` 为可选非负整数，默认 0；在验证集固定洗牌并排除已有验证 ID 与长度不合格样本之后，跳过前 N 个合格样本，再选取 `eval_samples` 个。`selection.json` 记录偏移值和跳过的 ID；不访问测试集。
+
+### 可选留出集及独立试验种子
+
+OPD 配置 `eval_split` 可为 `validation`（缺省，保持原行为）或 `test`；`eval_seed` 缺省为划分 `seed + 3`，固定评测候选顺序。测试模式从学生基线 `split_manifest.json` 的 `tokenization.test.kept_ids` 排除已读取 ID，拒绝空、重复或不属于重建测试划分的排除清单；可用 `expected_prior_test_count` 检查清单数目。验证模式仍排除学生和教师已使用的验证 ID。评测只检查原有完整样本 `max_length`，训练另检查 `max_prompt_tokens`；两者均不按模型结果筛选。`eval_offset` 同样对选择的评测划分生效。
+
+CLI 可选 `--trial-seed <非负整数>`，覆盖配置中的 `trial_seed`；未指定时回退到划分 `seed`。试验种子控制训练 ID 洗牌与训练阶段采样，不改变 `prepare_splits` 使用的划分种子或评测洗牌种子。实际配置写入 `config.json`；`selection.json` 记录划分、试验和评测种子、评测划分、排除及选中 ID。每次运行均独立重新生成起始学生预测，不复用跨运行结果。`configs/opd_06b_4b_heldout.json` 声明 96 个新测试 ID、预期排除 64 个旧 ID、16 次更新及 128 token rollout；试验种子 42/43/44 分别使用独立输出目录。

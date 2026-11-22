@@ -76,3 +76,7 @@ $env:HF_HOME = 'D:\opdistill\hf-cache'
 试跑输出为仓库外的空目录，`progress.json` 在每步或每条评测后原子更新；`status.json` 标示完成或失败。`selection.json`、`provenance.json`、各分支 `trajectories.json`、`predictions.json`、`metrics.json` 和 adapter 可用于追溯；中途失败可能留下不完整记录。该入口尚未在真实师生联合负载下验收，不代表蒸馏或显存结果。
 
 配置 `configs/opd_validation_06b_4b.json` 将每组更新步数设为 16、rollout 上限设为 128，并在同一验证选择顺序中跳过前 16 个合格样本后选取 64 条；此配置用于后续验证，实际结果以运行记录为准。
+
+### 预先声明的留出比较配置
+
+`configs/opd_06b_4b_heldout.json` 是待验证的有界比较方案，不表示实验已经执行：固定划分种子 42 和评测洗牌种子 45，在测试划分排除学生基线清单中已读取的 64 条测试 ID，再按既有完整样本长度过滤选取 96 条；不按模型输出筛选。三次运行分别追加 `--trial-seed 42`、`--trial-seed 43`、`--trial-seed 44`，各用新的空输出目录；这改变训练样本顺序和 OPD 采样种子，但不改变划分和评测 ID。同一次运行中 OPD 与继续 SFT 共用 16 条训练样本和 16 次更新，起始学生及两个分支均在相同测试样本独立生成，禁止将其解释为等 token 预算。128 token rollout 上限已根据验证运行的训练轨迹预先固定；该配置本身不会启动实验。
